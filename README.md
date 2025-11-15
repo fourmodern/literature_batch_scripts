@@ -1,15 +1,16 @@
 # Literature Batch Processing System
 
-A high-performance batch processing system that extracts metadata and PDFs from Zotero, generates AI summaries using GPT, and creates Obsidian-compatible markdown notes.
+A comprehensive literature processing system that extracts metadata and PDFs from Zotero, generates AI summaries using GPT or Gemini, and creates Obsidian-compatible markdown notes with automatic synchronization.
 
 ## Features
 
 - 🚀 **Parallel Processing**: Process multiple papers simultaneously (5-10x faster)
-- 📚 **Zotero Integration**: Direct API access, no export files needed
-- 🤖 **AI Summaries**: Korean language summaries with GPT-4o-mini
+- 📚 **Zotero Integration**: Direct API access, supports journal articles, preprints, and conference papers
+- 🤖 **AI Summaries**: Korean language summaries with GPT-4o-mini or Gemini
 - 📁 **Smart Organization**: Mirrors Zotero collection structure
-- 🔄 **Resume Support**: Continue from interruptions
+- 🔄 **Auto-Sync**: Automatic background synchronization with macOS launchd
 - 📊 **Progress Tracking**: Real-time progress with checkpoint saves
+- 🔁 **Resume Support**: Continue from interruptions
 
 ## Quick Start
 
@@ -43,6 +44,29 @@ python scripts/run_literature_batch.py --workers 5
 python scripts/run_literature_batch.py --skip-gpt --workers 10
 ```
 
+## Auto-Sync Setup (macOS)
+
+Automatically sync Zotero changes every 30 minutes:
+
+```bash
+# Configure and install
+bash scripts/setup_plist.sh
+
+# Or manually sync anytime
+python scripts/zotero_auto_sync.py
+```
+
+## Core Scripts
+
+- `run_literature_batch.py` - Main batch processing
+- `zotero_auto_sync.py` - Automatic synchronization
+- `sync_checker.py` - Compare Zotero vs Obsidian
+- `sync_executor.py` - Execute sync operations
+- `process_single_pdf.py` - Process individual PDFs
+- `process_zotero_pdf.py` - Process Zotero storage PDFs
+
 ## Documentation
 
-See [CLAUDE.md](CLAUDE.md) for detailed documentation and troubleshooting.
+- [CLAUDE.md](CLAUDE.md) - Detailed documentation and commands
+- [docs/AUTO_SYNC_SETUP.md](docs/AUTO_SYNC_SETUP.md) - Auto-sync configuration
+- [docs/SETUP_ON_ANOTHER_MAC.md](docs/SETUP_ON_ANOTHER_MAC.md) - Multi-machine setup

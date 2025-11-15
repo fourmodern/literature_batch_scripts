@@ -379,7 +379,7 @@ def process_item(item, args, log, output_dir, pdf_base_dir, zot=None):
             context['pdf_path'] = rel_pdf_path
             
             # Re-render with updated PDF path
-            md_content = render_note('literature_note.md', context)
+            md_content = render_note('literature_note.md', context, include_ai_links=True)
         except Exception as e:
             log.warning(f"Failed to copy PDF: {e}")
             # Keep original pdf_path if copy fails
@@ -390,7 +390,7 @@ def process_item(item, args, log, output_dir, pdf_base_dir, zot=None):
         if pdf_path:
             context['pdf_path'] = f"file://{pdf_path}"
             # Re-render with file:// path
-            md_content = render_note('literature_note.md', context)
+            md_content = render_note('literature_note.md', context, include_ai_links=True)
     
     if not args.dry_run:
         try:
@@ -485,11 +485,12 @@ def main():
     
     # Always get Zotero instance for automatic PDF downloads
     items, zot = fetch_zotero_items(
-        os.getenv('ZOTERO_USER_ID'), 
-        os.getenv('ZOTERO_API_KEY'), 
+        os.getenv('ZOTERO_USER_ID'),
+        os.getenv('ZOTERO_API_KEY'),
         limit=args.limit,
         collection_filter=args.collection,
-        return_zot_instance=True
+        return_zot_instance=True,
+        item_types=['journalArticle', 'preprint', 'conferencePaper']
     )
     
     if not items:

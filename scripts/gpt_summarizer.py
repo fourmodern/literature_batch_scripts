@@ -18,6 +18,7 @@ from openai import (
     RateLimitError, APITimeoutError, APIConnectionError,
     APIError, BadRequestError, AuthenticationError, InternalServerError
 )
+from api_cost_optimizer import APICostOptimizer, TextOptimizer, get_optimized_model_choice
 
 
 def summarize_text_with_retry(
@@ -27,6 +28,8 @@ def summarize_text_with_retry(
     max_tokens: int = 500,
     max_retries: int = 3,
     request_timeout: int = 300,  # 5분으로 증가
+    use_cache: bool = True,
+    use_optimizer: bool = True,
 ) -> str:
     """
     Generate summary using OpenAI API with retry logic for rate limits and errors.
@@ -40,7 +43,23 @@ def summarize_text_with_retry(
     if not text or not text.strip():
         return "No text available for summarization."
 
-    model = model or os.getenv("MODEL", "gpt-4o")
+    # 비용 최적화 도구 초기화
+    if use_optimizer:
+        optimizer = APICostOptimizer()
+        
+        # 캐시 확인
+        if use_cache:
+            cached = optimizer.get_cached_response(text, prompt, model or os.getenv("MODEL", "gpt-4o-mini"))
+            if cached:
+                return cached
+    
+    # 모델 자동 선택 (최적화 모드)
+    if use_optimizer and not model:
+        task_type = "keywords" if "키워드" in prompt else "summary"
+        model = get_optimized_model_choice(len(text), task_type)
+        print(f"📊 Selected model: {model} for {len(text)} chars")
+    else:
+        model = model or os.getenv("MODEL", "gpt-4o-mini")
 
     # 클라이언트에 timeout 지정 (요청마다 timeout을 주고 싶다면 with_options 사용)
     client = OpenAI(
@@ -49,10 +68,17 @@ def summarize_text_with_retry(
         timeout=request_timeout, # 전체 요청 타임아웃 (기본 5분)
     )
 
-    # 매우 긴 입력의 보수적 트렁케이션 (문자 길이 기준; 실제 토큰과 다를 수 있음)
-    max_input_length = 30000  # ~7.5k 토큰 수준 가정
-    if len(text) > max_input_length:
-        text = text[:max_input_length] + "... [truncated]"
+    # 텍스트 최적화 (스마트 트렁케이션)
+    if use_optimizer:
+        original_length = len(text)
+        text = TextOptimizer.smart_truncate(text, max_chars=20000, preserve_sections=True)
+        if len(text) < original_length:
+            print(f"✂️ Text optimized: {original_length} → {len(text)} chars")
+    else:
+        # 기존 단순 트렁케이션
+        max_input_length = 30000  # ~7.5k 토큰 수준 가정
+        if len(text) > max_input_length:
+            text = text[:max_input_length] + "... [truncated]"
 
     messages = [
         {
@@ -103,7 +129,15 @@ def summarize_text_with_retry(
                     messages=messages,
                     max_tokens=max_tokens,
                 )
-                return resp.choices[0].message.content.strip()
+                result = resp.choices[0].message.content.strip()
+                
+                # 성공 시 캐시 저장 및 비용 로깅
+                if use_optimizer:
+                    optimizer.save_to_cache(text, prompt, model, result)
+                    cost = optimizer.log_api_usage(model, text + prompt, result)
+                    print(f"💰 Estimated cost: ${cost:.4f}")
+                
+                return result
 
         except RateLimitError as e:
             # 429 → 지수 백오프
@@ -153,7 +187,7 @@ def summarize_text(text: str, prompt: str, model: str = None, max_tokens: int = 
     return summarize_text_with_retry(text, prompt, model, max_tokens)
 
 
-def generate_short_long(text: str, title: str = None):
+def generate_short_long(text: str, title: str = None, use_optimizer: bool = True):
     """Generate both short and long summaries of the text."""
     short_prompt = (
         "이 논문의 핵심 내용을 3-5개의 문장으로 정확하게 요약해주세요.\n\n"
@@ -185,8 +219,17 @@ def generate_short_long(text: str, title: str = None):
         short_prompt = f"Paper Title: {title}\n\n{short_prompt}"
         long_prompt = f"Paper Title: {title}\n\n{long_prompt}"
 
-    # GPT-5-mini는 더 많은 토큰이 필요 (Responses API 사용 시)
-    model = os.getenv("MODEL", "gpt-4o-mini")
+    # 비용 최적화 모드에서는 기본적으로 저렴한 모델 사용
+    if use_optimizer:
+        model = os.getenv("MODEL", "gpt-4o-mini")
+        # 짧은 요약은 무조건 mini 모델 사용
+        short_model = "gpt-4o-mini"
+        # 긴 요약은 텍스트 길이에 따라 결정
+        long_model = get_optimized_model_choice(len(text), "summary")
+    else:
+        model = os.getenv("MODEL", "gpt-4o-mini")
+        short_model = model
+        long_model = model
     # GPT-5는 Responses API로 충분한 출력 토큰 확보
     if 'gpt-5' in model:
         short_tokens = 1200  # 간단 요약용
@@ -195,12 +238,14 @@ def generate_short_long(text: str, title: str = None):
         short_tokens = 400
         long_tokens = 3000
     
-    short = summarize_text(text, short_prompt, max_tokens=short_tokens)
-    long = summarize_text(text, long_prompt, max_tokens=long_tokens)
+    short = summarize_text_with_retry(text, short_prompt, model=short_model, 
+                                      max_tokens=short_tokens, use_optimizer=use_optimizer)
+    long = summarize_text_with_retry(text, long_prompt, model=long_model, 
+                                     max_tokens=long_tokens, use_optimizer=use_optimizer)
     return short, long
 
 
-def generate_sections(text: str, title: str = None):
+def generate_sections(text: str, title: str = None, use_optimizer: bool = True):
     """Generate contributions, limitations, ideas, keywords."""
     # title 파라미터 활용
     prefix = f"Paper Title: {title}\n\n" if title else ""
@@ -208,10 +253,13 @@ def generate_sections(text: str, title: str = None):
     contribution_prompt = prefix + "논문 기여도를 bullet로 정리. 원문 표현을 최대한 보존."
     limitations_prompt = prefix + "논문 한계점을 정리. 원문 인용 포함."
     ideas_prompt = prefix + "향후 연구 방향/미해결 질문을 분류(A/B/C/D)하여 정리."
-    keywords_prompt = prefix + "다른 논문과 연결 가능한 핵심 키워드 5-8개를 쉼표로 구분하여 나열(소문자, 하이픈 사용). 예: machine-learning, deep-neural-networks, computer-vision"
+    keywords_prompt = prefix + "다른 논문과 연결 가능한 핵심 키워드 10개를 쉼표로 구분하여 나열(소문자, 하이픈 사용). 예: machine-learning, deep-neural-networks, computer-vision"
 
-    # GPT-5-mini는 Responses API로 적절한 토큰 설정
-    model = os.getenv("MODEL", "gpt-4o-mini")
+    # 섹션별 요약은 모두 저렴한 모델 사용 (비용 최적화)
+    if use_optimizer:
+        model = "gpt-4o-mini"  # 섹션 분석은 항상 mini 모델
+    else:
+        model = os.getenv("MODEL", "gpt-4o-mini")
     if 'gpt-5' in model:
         section_tokens = 1500  # 섹션별 요약용
         keyword_tokens = 500   # 키워드용
@@ -219,10 +267,14 @@ def generate_sections(text: str, title: str = None):
         section_tokens = 500
         keyword_tokens = 200
     
-    contributions = summarize_text(text, contribution_prompt, max_tokens=section_tokens)
-    limitations = summarize_text(text, limitations_prompt, max_tokens=section_tokens)
-    ideas = summarize_text(text, ideas_prompt, max_tokens=section_tokens)
-    keywords = summarize_text(text, keywords_prompt, max_tokens=keyword_tokens)
+    contributions = summarize_text_with_retry(text, contribution_prompt, model=model,
+                                             max_tokens=section_tokens, use_optimizer=use_optimizer)
+    limitations = summarize_text_with_retry(text, limitations_prompt, model=model,
+                                           max_tokens=section_tokens, use_optimizer=use_optimizer)
+    ideas = summarize_text_with_retry(text, ideas_prompt, model=model,
+                                     max_tokens=section_tokens, use_optimizer=use_optimizer)
+    keywords = summarize_text_with_retry(text, keywords_prompt, model="gpt-4o-mini",
+                                        max_tokens=keyword_tokens, use_optimizer=use_optimizer)
     return contributions, limitations, ideas, keywords
 
 

@@ -214,7 +214,7 @@ def _format_table_as_markdown(table: list) -> str:
 
 def extract_images_from_pdf(pdf_path: str, output_dir: str = None) -> List[Dict]:
     """
-    Extract images from PDF and save them as PNG files.
+    Enhanced image extraction from PDF with multiple methods.
     Returns list of image metadata with paths.
     """
     if not os.path.exists(pdf_path):
@@ -228,10 +228,12 @@ def extract_images_from_pdf(pdf_path: str, output_dir: str = None) -> List[Dict]
     images = []
     doc = fitz.open(pdf_path)
     
-    print(f"Extracting images from {len(doc)} pages...")
+    print(f"Extracting images from {len(doc)} pages using enhanced methods...")
     
     for page_num in range(len(doc)):
         page = doc.load_page(page_num)
+        
+        # Method 1: Standard image extraction
         image_list = page.get_images(full=True)
         
         for img_index, img in enumerate(image_list):
@@ -240,8 +242,20 @@ def extract_images_from_pdf(pdf_path: str, output_dir: str = None) -> List[Dict]
                 xref = img[0]
                 pix = fitz.Pixmap(doc, xref)
                 
-                # Skip very small images (likely artifacts)
-                if pix.width < 50 or pix.height < 50:
+                # Skip small images (likely logos, icons, artifacts)
+                # Only keep meaningful figures/graphs (at least 200x200)
+                if pix.width < 200 or pix.height < 200:
+                    pix = None
+                    continue
+
+                # Skip images from first page (usually logos/headers)
+                if page_num == 0 and pix.height < 400:
+                    pix = None
+                    continue
+
+                # Skip very narrow or tall images (likely decorative lines)
+                aspect_ratio = pix.width / pix.height
+                if aspect_ratio < 0.2 or aspect_ratio > 5:
                     pix = None
                     continue
                 
@@ -260,7 +274,7 @@ def extract_images_from_pdf(pdf_path: str, output_dir: str = None) -> List[Dict]
                 with open(img_path, "wb") as f:
                     f.write(img_data)
                 
-                # Store metadata
+                # Store metadata with enhanced information
                 images.append({
                     'path': img_path,
                     'filename': img_filename,
@@ -268,26 +282,93 @@ def extract_images_from_pdf(pdf_path: str, output_dir: str = None) -> List[Dict]
                     'index': img_index + 1,
                     'width': pix.width,
                     'height': pix.height,
-                    'size_bytes': len(img_data)
+                    'size_bytes': len(img_data),
+                    'extraction_method': 'standard'
                 })
                 
                 print(f"  ✓ Extracted image: {img_filename} ({pix.width}x{pix.height})")
                 pix = None
                 
             except Exception as e:
-                print(f"  ✗ Failed to extract image {img_index} from page {page_num+1}: {e}")
+                print(f"  ⚠️ Standard extraction failed for image {img_index} on page {page_num+1}: {e}")
                 continue
+        
+        # Method 2: Try to extract images as rendered regions if standard method found nothing
+        if not any(img['page'] == page_num + 1 for img in images):
+            try:
+                # Get page as pixmap (rendered image)
+                mat = fitz.Matrix(2, 2)  # 2x zoom for better quality
+                pix = page.get_pixmap(matrix=mat)
+                
+                # Only save if page seems to contain non-text content
+                # Check if page has minimal text (might be mostly images)
+                text = page.get_text().strip()
+                if len(text) < 500:  # Page with little text, likely image-heavy
+                    img_filename = f"page{page_num+1}_rendered.png"
+                    img_path = os.path.join(output_dir, img_filename)
+                    
+                    pix.save(img_path)
+                    
+                    images.append({
+                        'path': img_path,
+                        'filename': img_filename,
+                        'page': page_num + 1,
+                        'index': 0,
+                        'width': pix.width,
+                        'height': pix.height,
+                        'size_bytes': os.path.getsize(img_path),
+                        'extraction_method': 'rendered_page'
+                    })
+                    
+                    print(f"  ✓ Extracted rendered page: {img_filename} (fallback method)")
+                
+                pix = None
+            except Exception as e:
+                print(f"  ⚠️ Rendered extraction failed for page {page_num+1}: {e}")
     
     doc.close()
-    print(f"Extracted {len(images)} images to {output_dir}")
-    return images
+    
+    # Remove duplicates based on similar size and page
+    unique_images = []
+    seen = set()
+    for img in images:
+        key = (img['page'], img['width'], img['height'])
+        if key not in seen:
+            seen.add(key)
+            unique_images.append(img)
+    
+    print(f"Extracted {len(unique_images)} unique images to {output_dir}")
+    return unique_images
 
 def extract_image_captions(pdf_path: str) -> List[Dict]:
     """
-    Extract text that looks like image captions (Figure X, 그림 X, etc.)
+    Enhanced caption extraction with better pattern matching and multi-language support.
     """
+    import re
+    
     captions = []
     doc = fitz.open(pdf_path)
+    
+    # Enhanced caption patterns
+    caption_patterns = [
+        # English patterns
+        (r'^(Figure|Fig\.?)\s+(\d+[A-Za-z]?|[A-Z]\d*)[:\.\s]', 100),
+        (r'^(Table)\s+(\d+[A-Za-z]?|[A-Z]\d*)[:\.\s]', 90),
+        (r'^(Scheme|Schema)\s+(\d+[A-Za-z]?|[A-Z]\d*)[:\.\s]', 95),
+        (r'^(Chart|Graph)\s+(\d+[A-Za-z]?|[A-Z]\d*)[:\.\s]', 85),
+        (r'^(Supplementary\s+Figure|Supp\.?\s*Fig\.?)\s+', 70),
+        (r'^(Graphical\s+Abstract)', 150),
+        # Korean patterns
+        (r'^(그림|도표)\s*(\d+)[:\.\s]', 100),
+        (r'^(표)\s*(\d+)[:\.\s]', 90),
+        (r'^(도식|스킴)\s*(\d+)[:\.\s]', 95),
+        # Japanese patterns
+        (r'^(図|圖)\s*(\d+)[:\.\s]', 100),
+        (r'^(表)\s*(\d+)[:\.\s]', 90),
+        # Chinese patterns
+        (r'^(图|圖)\s*(\d+)[:\.\s]', 100),
+        (r'^(表)\s*(\d+)[:\.\s]', 90),
+    ]
     
     for page_num in range(len(doc)):
         page = doc.load_page(page_num)
@@ -295,42 +376,80 @@ def extract_image_captions(pdf_path: str) -> List[Dict]:
         
         for block in blocks["blocks"]:
             if block["type"] == 0:  # Text block
-                text = ""
+                # Build complete block text
+                full_text = ""
                 for line in block["lines"]:
+                    line_text = ""
                     for span in line["spans"]:
-                        text += span["text"] + " "
+                        line_text += span["text"]
+                    full_text += line_text + " "
                 
-                text = text.strip()
-                # Look for figure/table captions with priority scoring
-                caption_keywords = {
-                    'graphical abstract': 100,  # Highest priority
-                    'fig. 1': 90, 'figure 1': 90, 'fig 1': 90,
-                    'fig. 2': 80, 'figure 2': 80, 'fig 2': 80,
-                    'fig. 3': 70, 'figure 3': 70, 'fig 3': 70,
-                    'figure ': 50, 'fig ': 50, 'fig.': 50,
-                    '그림 1': 90, '그림 2': 80, '그림 3': 70, '그림 ': 50,
-                    'table 1': 85, 'table ': 40, '표 1': 85, '표 ': 40,
-                    'chart ': 30, 'graph ': 30
-                }
+                full_text = full_text.strip()
+                if not full_text:
+                    continue
                 
-                text_lower = text.lower()
+                # Check against patterns
                 priority = 0
-                for keyword, score in caption_keywords.items():
-                    if keyword in text_lower:
+                caption_type = None
+                figure_number = None
+                
+                for pattern, score in caption_patterns:
+                    match = re.search(pattern, full_text, re.IGNORECASE | re.MULTILINE)
+                    if match:
                         priority = max(priority, score)
+                        if len(match.groups()) >= 2:
+                            figure_number = match.group(2)
+                        caption_type = match.group(1) if match.groups() else 'Caption'
+                        break
+                
+                # Also check for keywords if no pattern matched
+                if priority == 0:
+                    text_lower = full_text.lower()
+                    keyword_scores = {
+                        'figure': 50, 'fig': 50, 'table': 40, 'scheme': 45,
+                        'chart': 30, 'graph': 30, 'diagram': 35,
+                        '그림': 50, '표': 40, '도표': 35, '도식': 45,
+                        '図': 50, '表': 40, '图': 50
+                    }
+                    
+                    for keyword, score in keyword_scores.items():
+                        if keyword in text_lower and len(full_text) < 500:  # Captions are usually short
+                            priority = max(priority, score)
+                            caption_type = keyword.capitalize()
                 
                 if priority > 0:
+                    # Extract clean caption text (remove the Figure X: part)
+                    clean_text = full_text
+                    if figure_number:
+                        # Try to extract just the description part
+                        parts = re.split(r'[:\.\s]\s*', full_text, maxsplit=2)
+                        if len(parts) > 2:
+                            clean_text = parts[2]
+                    
                     captions.append({
                         'page': page_num + 1,
-                        'text': text,
+                        'text': full_text,
+                        'clean_text': clean_text,
                         'bbox': block["bbox"],
-                        'priority': priority
+                        'priority': priority,
+                        'type': caption_type,
+                        'number': figure_number
                     })
     
     doc.close()
-    # Sort by priority (highest first)
-    captions.sort(key=lambda x: x['priority'], reverse=True)
-    return captions
+    
+    # Remove duplicates and sort by priority
+    seen = set()
+    unique_captions = []
+    for cap in captions:
+        # Use first 100 chars for deduplication
+        key = (cap['page'], cap['text'][:100])
+        if key not in seen:
+            seen.add(key)
+            unique_captions.append(cap)
+    
+    unique_captions.sort(key=lambda x: (-x['priority'], x['page']))
+    return unique_captions
 
 def extract_figures_and_tables(pdf_path: str) -> Tuple[List[Dict], List[Dict]]:
     """
@@ -439,10 +558,79 @@ def extract_figures_and_tables(pdf_path: str) -> Tuple[List[Dict], List[Dict]]:
     
     return unique_figures, unique_tables
 
+def match_images_with_captions(images: List[Dict], captions: List[Dict]) -> List[Dict]:
+    """
+    Match images with their captions using proximity and content analysis.
+    Returns images with matched caption information.
+    """
+    if not images:
+        return []
+    
+    matched_images = []
+    
+    for img in images:
+        img_copy = img.copy()
+        img_copy['caption'] = None
+        img_copy['caption_confidence'] = 0
+        
+        # Find best matching caption
+        best_match = None
+        best_score = 0
+        
+        for caption in captions:
+            # Calculate matching score based on proximity
+            score = 0
+            
+            # Same page = high score
+            if caption['page'] == img['page']:
+                score += 100
+            # Adjacent page = medium score
+            elif abs(caption['page'] - img['page']) == 1:
+                score += 50
+            else:
+                continue  # Skip if too far
+            
+            # Position-based scoring (if bbox available)
+            if 'bbox' in caption and 'bbox' in img:
+                # Calculate vertical distance
+                img_y = img.get('bbox', [0, 0, 0, 0])[1]
+                cap_y = caption['bbox'][1]
+                distance = abs(img_y - cap_y)
+                
+                # Closer = higher score
+                if distance < 100:
+                    score += 50
+                elif distance < 200:
+                    score += 30
+                elif distance < 300:
+                    score += 10
+            
+            # Caption type bonus
+            if caption.get('type', '').lower() in ['figure', 'fig', '그림', '図', '图']:
+                score += 20
+            
+            # Priority bonus
+            score += caption.get('priority', 0) / 10
+            
+            if score > best_score:
+                best_score = score
+                best_match = caption
+        
+        if best_match:
+            img_copy['caption'] = best_match['text']
+            img_copy['caption_clean'] = best_match.get('clean_text', best_match['text'])
+            img_copy['caption_confidence'] = min(best_score / 200, 1.0)  # Normalize to 0-1
+            img_copy['caption_type'] = best_match.get('type', 'Unknown')
+            img_copy['caption_number'] = best_match.get('number', '')
+        
+        matched_images.append(img_copy)
+    
+    return matched_images
+
 def identify_key_figures(images: List[Dict], captions: List[Dict]) -> List[Dict]:
     """
-    Identify the most important figures based on various criteria.
-    Returns images with priority scores.
+    Enhanced figure importance scoring with caption matching.
+    Returns images with priority scores and matched captions.
     """
     if not images:
         return []
@@ -536,41 +724,63 @@ def encode_image_to_base64(image_path: str) -> str:
 
 def extract_text_and_images(pdf_path: str, output_dir: str = None, max_pages: int = None) -> Tuple[str, List[Dict], List[Dict], Optional[Dict]]:
     """
-    Extract text, images, and captions from PDF.
+    Enhanced extraction with better image-caption matching.
     Returns (text_content, image_list, caption_list, featured_image)
     """
-    print(f"Starting comprehensive extraction from: {os.path.basename(pdf_path)}")
+    print(f"Starting enhanced extraction from: {os.path.basename(pdf_path)}")
     
     # Extract text
     text_content = extract_text_from_pdf(pdf_path, max_pages)
     
-    # Extract images
+    # Extract images with enhanced methods
     try:
         if output_dir is None:
             output_dir = os.path.join(os.path.dirname(pdf_path), "extracted_images")
         images = extract_images_from_pdf(pdf_path, output_dir)
+        print(f"  📷 Extracted {len(images)} images")
     except Exception as e:
-        print(f"Image extraction failed: {e}")
+        print(f"  ⚠️ Image extraction failed: {e}")
         images = []
     
-    # Extract captions
+    # Extract captions with enhanced patterns
     try:
         captions = extract_image_captions(pdf_path)
+        print(f"  📝 Found {len(captions)} captions")
     except Exception as e:
-        print(f"Caption extraction failed: {e}")
+        print(f"  ⚠️ Caption extraction failed: {e}")
         captions = []
+    
+    # Match images with captions
+    if images and captions:
+        try:
+            images = match_images_with_captions(images, captions)
+            matched_count = sum(1 for img in images if img.get('caption'))
+            print(f"  🔗 Matched {matched_count}/{len(images)} images with captions")
+        except Exception as e:
+            print(f"  ⚠️ Caption matching failed: {e}")
     
     # Select featured image
     featured_image = None
     if images:
         try:
-            featured_image = select_featured_image(images, captions)
+            # First try to find images with high-confidence caption matches
+            high_confidence_images = [img for img in images if img.get('caption_confidence', 0) > 0.7]
+            if high_confidence_images:
+                featured_image = select_featured_image(high_confidence_images, captions)
+            else:
+                featured_image = select_featured_image(images, captions)
+            
             if featured_image:
-                print(f"Selected featured image: {featured_image['filename']} ({featured_image['selection_reason']})")
+                reason = featured_image.get('selection_reason', 'Best available')
+                if featured_image.get('caption'):
+                    print(f"  ⭐ Featured: {featured_image['filename']} - {reason}")
+                    print(f"     Caption: {featured_image['caption'][:100]}...")
+                else:
+                    print(f"  ⭐ Featured: {featured_image['filename']} - {reason} (no caption)")
         except Exception as e:
-            print(f"Featured image selection failed: {e}")
+            print(f"  ⚠️ Featured image selection failed: {e}")
     
-    print(f"Extraction complete: {len(text_content)} chars text, {len(images)} images, {len(captions)} captions")
+    print(f"✅ Extraction complete: {len(text_content):,} chars, {len(images)} images, {len(captions)} captions")
     return text_content, images, captions, featured_image
 
 if __name__ == '__main__':

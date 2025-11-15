@@ -54,6 +54,11 @@ journal: "{{ publicationTitle | default('') }}"
 > 📄 PDF not available
 {%- endif %}
 
+{%- if ai_tool_links %}
+
+{{ ai_tool_links }}
+{%- endif %}
+
 > [!Abstract]
 > {{ abstract }}
 

@@ -4,16 +4,21 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Purpose
 
-A batch processing system that extracts metadata and PDFs from Zotero, generates AI summaries using GPT or Gemini, and creates Obsidian-compatible markdown notes. The system processes hundreds of academic papers automatically, maintaining Zotero's collection hierarchy in the output structure.
+A comprehensive literature processing system that extracts metadata and PDFs from Zotero, generates AI summaries using GPT or Gemini, and creates Obsidian-compatible markdown notes with automatic synchronization.
 
 Optimized for Korean-language academic paper summarization but adaptable for other languages. Supports both text-only (GPT) and multimodal (Gemini) processing for papers with important figures and images.
+
+**Optional RAG System**: Advanced users can build searchable vector databases from academic papers for semantic search and question-answering (see scripts/rag/ directory).
 
 ## Commands
 
 ### Initial Setup
 ```bash
-# Install dependencies
+# Install core dependencies
 pip install -r requirements.txt
+
+# Install RAG system dependencies (optional, see scripts/rag/)
+pip install -r requirements_rag.txt
 
 # Copy and configure environment
 cp .env.example .env
@@ -27,10 +32,12 @@ Key environment variables in `.env`:
 - `OUTPUT_DIR`: Output directory for markdown files (default: ./ObsidianVault/LiteratureNotes/)
 - `PDF_DIR`: Zotero storage directory (auto-detected if not set)
 - `SUMMARIZER`: Choose `gpt` (text-only) or `gemini` (multimodal)
-- `OPENAI_API_KEY`: Required for GPT summarization
+- `OPENAI_API_KEY`: Required for GPT summarization and RAG answer generation
 - `GEMINI_API_KEY`: Required for Gemini summarization
 - `MODEL`: GPT model selection (`gpt-4o-mini` or `gpt-4o`)
 - `GEMINI_MODEL`: Gemini model selection (`gemini-1.5-pro` or `gemini-1.5-flash`)
+- `PINECONE_API_KEY`: Optional, for cloud-based vector search
+- `PINECONE_ENVIRONMENT`: Pinecone environment (e.g., `gcp-starter`)
 
 ### Testing Setup
 ```bash
@@ -68,9 +75,21 @@ python scripts/run_literature_batch.py --workers 10 --no-pdf-download
 # Diagnose PDF sync issues
 python scripts/check_zotero_sync.py
 
-# Test PDF extraction quality
-python scripts/test_pdf_extraction.py
-python scripts/test_pdf_extraction.py "TYK2"  # Test specific collection
+# Check Zotero-Obsidian sync status
+python scripts/sync_checker.py                           # Compare all items
+python scripts/sync_checker.py --collection "AIDD"       # Compare specific collection
+python scripts/sync_checker.py --output sync_report.json # Save report as JSON
+
+# Execute sync (move/archive files based on comparison)
+python scripts/sync_executor.py --dry-run                      # Preview changes without executing
+python scripts/sync_executor.py                                # Execute sync (with backup)
+python scripts/sync_executor.py --no-backup                    # Execute without backup (not recommended)
+python scripts/sync_executor.py --collection "AIDD"            # Sync specific collection only
+python scripts/sync_executor.py --from-json sync_report.json   # Use existing comparison JSON
+
+# Automatic synchronization (macOS launchd)
+python scripts/zotero_auto_sync.py                             # Run manual sync
+bash scripts/setup_plist.sh                                    # Configure auto-sync (30min interval)
 ```
 
 ### Processing Single PDF Files
@@ -94,6 +113,9 @@ python scripts/process_zotero_pdf.py ~/Zotero/storage/ABCD1234/paper.pdf --outpu
 python scripts/process_zotero_pdf.py ~/Zotero/storage/ABCD1234/paper.pdf --skip-gpt
 ```
 
+### RAG System Commands (Optional)
+RAG scripts are located in `scripts/rag/` directory. See `requirements_rag.txt` for dependencies.
+
 ### Command Line Arguments
 - `--limit N`: Process only N papers
 - `--collection "Name"`: Process only papers from a specific Zotero collection
@@ -108,14 +130,15 @@ python scripts/process_zotero_pdf.py ~/Zotero/storage/ABCD1234/paper.pdf --skip-
 
 ## Architecture
 
-### Pipeline Flow
+### Literature Processing Pipeline
 1. **Zotero API** → Fetch paper metadata and collection hierarchy via pyzotero
 2. **PDF Location** → Auto-detect Zotero storage directory (~/Zotero/storage/)
 3. **PDF Download** → Automatically download missing PDFs from Zotero server
 4. **Text Extraction** → Extract full text from PDFs using PyMuPDF (fallback to pdfplumber)
-5. **AI Summarization** → Generate short (5 lines) and detailed (1 page) summaries via GPT
+5. **AI Summarization** → Generate short (5 lines) and detailed (1 page) summaries via GPT/Gemini
 6. **Markdown Generation** → Create structured notes using Jinja2 templates
 7. **Folder Organization** → Mirror Zotero collection structure in output directory
+8. **Auto-Sync** → Keep Obsidian vault synchronized with Zotero library (macOS launchd)
 
 ### Key Design Decisions
 
@@ -125,6 +148,7 @@ python scripts/process_zotero_pdf.py ~/Zotero/storage/ABCD1234/paper.pdf --skip-
 - Preserves collection hierarchy as folder structure
 - Handles standard Zotero storage pattern: `storage/[8-char-key]/filename.pdf`
 - **Pagination support**: Fetches all items (not limited to 100) with automatic batching
+- **Item type support**: Journal articles, arXiv preprints, conference papers
 
 **Processing Strategy**
 - Tracks processed papers in `logs/done.txt` to avoid duplicates
@@ -144,8 +168,11 @@ python scripts/process_zotero_pdf.py ~/Zotero/storage/ABCD1234/paper.pdf --skip-
 - Generates three types of content: short summary, detailed summary, and analysis sections (contributions, limitations, ideas)
 - Truncates very long texts to ~30k characters (GPT) or ~800k characters (Gemini) to stay within token limits
 - Uses temperature 0.3 for consistent, factual summaries
-- Implements retry logic with exponential backoff for rate limits
-- Handles API timeouts gracefully with automatic retries
+- **Rate limit handling**:
+  - Automatic exponential backoff: 20s → 40s → 80s on rate limits
+  - Smart retry logic for different error types (timeout, connection, server errors)
+  - Response caching (24h) to avoid duplicate API calls
+  - Configurable worker count based on API tier (2-10 workers)
 - Can be skipped entirely with `--skip-gpt` for faster processing
 - **Anti-hallucination measures**: 
   - Strict prompts to only use content from the PDF
@@ -162,21 +189,46 @@ python scripts/process_zotero_pdf.py ~/Zotero/storage/ABCD1234/paper.pdf --skip-
 - Includes full bibliographic metadata in frontmatter
 - Supports Obsidian-specific features (tags, links, callouts)
 
+**Auto-Sync System**
+- Monitors Zotero library for changes (added/deleted/moved papers)
+- Archives deleted papers instead of deleting them (`_archived/` folder)
+- Moves papers to new collection folders when collections change
+- Runs automatically every 30 minutes via macOS launchd
+- Safe processing order: deleted/moved BEFORE added (prevents conflicts)
+
 ### Module Responsibilities
 
+**Core Processing** (scripts/)
 - `run_literature_batch.py`: Main orchestrator, CLI handling, progress tracking, parallel processing coordination
 - `process_single_pdf.py`: Process individual PDF files without Zotero, extract metadata from PDF content
 - `process_zotero_pdf.py`: Process single Zotero storage PDF with full metadata from API
-- `zotero_fetch.py`: Zotero API interaction, collection hierarchy building, pagination handling
+- `process_missing_papers.py`: Process papers from sync_checker.py JSON report
+
+**Sync & Auto-Sync** (scripts/)
+- `zotero_auto_sync.py`: Automatic synchronization orchestrator (runs via launchd)
+- `sync_checker.py`: Compare Zotero database with Obsidian folder to find differences (added/deleted/moved items)
+- `sync_executor.py`: Execute sync operations - move files to new collections, archive deleted items
+- `setup_plist.sh`: Configure macOS launchd for automatic synchronization
+
+**Data Extraction** (scripts/)
+- `zotero_fetch.py`: Zotero API interaction, collection hierarchy building, pagination handling, multi-item-type support
 - `text_extractor.py`: PDF text extraction with PyMuPDF fallback to pdfplumber, image extraction for multimodal processing
-- `gpt_summarizer.py`: OpenAI API calls, prompt management, Korean language summaries
-- `gemini_summarizer.py`: Google Gemini API calls with multimodal support (text + images)
-- `markdown_writer.py`: Template rendering, file writing, Obsidian-compatible formatting
 - `zotero_path_finder.py`: Cross-platform Zotero directory detection
 - `pdf_downloader.py`: Downloads missing PDFs from Zotero server with retry logic
+
+**AI Summarization** (scripts/)
+- `gpt_summarizer.py`: OpenAI API calls with rate limit handling, prompt management, Korean language summaries, caching support
+- `gemini_summarizer.py`: Google Gemini API calls with multimodal support (text + images)
+
+**Utilities** (scripts/)
+- `markdown_writer.py`: Template rendering, file writing, Obsidian-compatible formatting
 - `utils.py`: Logging, progress tracking, checkpoint management
-- `test_pdf_extraction.py`: Diagnostic tool for debugging PDF extraction issues
+- `create_batch_file.py`: Generate JSON batch files for bulk PDF processing
 - `check_zotero_sync.py`: Diagnostic tool for verifying Zotero file sync status
+
+**RAG System** (scripts/rag/ - optional)
+- Various scripts for building and querying vector databases
+- See `requirements_rag.txt` for dependencies
 
 ### Error Handling Patterns
 
@@ -188,30 +240,87 @@ python scripts/process_zotero_pdf.py ~/Zotero/storage/ABCD1234/paper.pdf --skip-
 
 ### Troubleshooting PDF Extraction
 
-If most PDFs are failing to extract text:
+**Common PDF Extraction Issues:**
+- **Scanned PDFs**: Image-based PDFs with no text layer
+- **Encrypted PDFs**: Password-protected files
+- **Corrupted PDFs**: Damaged or incomplete files
+- **Non-standard encoding**: Some PDFs use unusual text encoding
 
-1. **Run Detailed Diagnostics**
+**Solutions:**
+- For scanned PDFs: Consider OCR tools (not included)
+- Check if PDFs open correctly in a PDF viewer
+- Try downloading fresh copies from publishers
+- Use `--skip-gpt` to identify which PDFs extract successfully
+
+### Zotero-Obsidian Sync Workflow
+
+The sync system keeps your Obsidian vault in sync with your Zotero library.
+
+**Two-Step Process:**
+
+1. **Check Sync Status** (`sync_checker.py`):
    ```bash
-   python scripts/test_pdf_extraction.py
+   python scripts/sync_checker.py --output sync_report.json
    ```
-   This shows:
-   - File sizes and page counts
-   - Extraction quality metrics
-   - Whether PDFs are scanned (image-based)
-   - First few lines of extracted text
+   - Compares Zotero SQLite database with Obsidian folder
+   - Identifies: Added (Zotero only), Deleted (Obsidian only), Moved (collection changed)
+   - Outputs comparison to JSON file
 
-2. **Common PDF Extraction Issues**
-   - **Scanned PDFs**: Image-based PDFs with no text layer
-   - **Encrypted PDFs**: Password-protected files
-   - **Corrupted PDFs**: Damaged or incomplete files
-   - **Non-standard encoding**: Some PDFs use unusual text encoding
-   - **Too strict validation**: Now lowered to 100 chars minimum
+2. **Execute Sync** (`sync_executor.py`):
+   ```bash
+   # ALWAYS preview first
+   python scripts/sync_executor.py --dry-run
 
-3. **Solutions**
-   - For scanned PDFs: Consider OCR tools (not included)
-   - Check if PDFs open correctly in a PDF viewer
-   - Try downloading fresh copies from publishers
-   - Use `--skip-gpt` to identify which PDFs extract successfully
+   # Then execute
+   python scripts/sync_executor.py
+   ```
+   - **Moved items**: Relocates files to new collection folders
+   - **Deleted items**: Archives files to `_archived/{date}/` (doesn't delete)
+   - **Added items**: Shows list (process with `run_literature_batch.py`)
+   - **Automatic backup**: Creates `.tar.gz` backup before changes
+
+**Initial Bulk Sync:**
+```bash
+# 1. Check what needs syncing
+python scripts/sync_checker.py
+
+# 2. Preview changes (recommended)
+python scripts/sync_executor.py --dry-run
+
+# 3. Execute sync with backup
+python scripts/sync_executor.py
+
+# 4. Process new papers
+python scripts/run_literature_batch.py --collection "CollectionName"
+```
+
+**Safety Features:**
+- **Dry-run mode**: Preview all changes before executing
+- **Automatic backup**: Full vault backup before sync (can disable with `--no-backup`)
+- **Archive instead of delete**: Deleted items moved to `_archived/` folder
+- **Empty folder cleanup**: Automatically removes empty directories
+
+**Automatic Sync (Recommended):**
+```bash
+# Set up auto-sync (runs every 30 minutes)
+bash scripts/setup_plist.sh
+
+# Manual sync anytime
+python scripts/zotero_auto_sync.py
+```
+
+**Manual Workflow:**
+```bash
+# 1. Check for changes
+python scripts/sync_checker.py
+
+# 2. Preview and execute sync
+python scripts/sync_executor.py --dry-run
+python scripts/sync_executor.py
+
+# 3. Process new papers from Zotero
+python scripts/run_literature_batch.py --limit 10
+```
 
 ### Troubleshooting PDF Downloads
 
@@ -274,7 +383,11 @@ For custom locations, set `PDF_DIR` in `.env`.
 - `logs/done.txt`: List of processed paper keys (one per line)
 - `logs/summary.log`: Detailed processing log with timestamps
 - `logs/checkpoint.json`: Resume checkpoint containing progress state
+- `logs/auto_sync/`: Auto-sync logs and change reports
 - `ObsidianVault/LiteratureNotes/`: Default output directory for markdown files
+- `_archived/`: Deleted papers are moved here instead of being deleted
+- `sync_report.json`: Sync status comparison report (optional output from sync_checker.py)
+- `config/com.fourmodern.zotero-sync.plist`: macOS launchd configuration
 
 ### Performance Considerations
 - Default 5 parallel workers balances speed and API rate limits
@@ -282,3 +395,18 @@ For custom locations, set `PDF_DIR` in `.env`.
 - PDF extraction is CPU-intensive; GPT API calls are I/O-bound
 - With 10 workers, can process ~100 papers in 10-15 minutes (with GPT)
 - Without GPT (`--skip-gpt`), can process ~500 papers in 5-10 minutes
+
+### RAG System (Optional)
+
+Advanced users can build searchable vector databases from their academic papers. RAG scripts are located in `scripts/rag/` directory.
+
+**Installation:**
+```bash
+pip install -r requirements_rag.txt
+```
+
+**Features:**
+- Text-based and multimodal (text + image) search
+- Local (ChromaDB) or cloud (Pinecone) storage
+- Semantic chunking and embedding generation
+- See scripts in `scripts/rag/` for details

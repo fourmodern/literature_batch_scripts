@@ -42,3 +42,28 @@ htmlcov/
 dist/
 build/
 *.egg-info/
+
+# Data directories
+data/
+databases/
+cache/
+extracted_images/
+
+# Test directories
+test_*/
+
+# RAG/Vector DB directories (archived/experimental)
+*_vector_db/
+*_rag_*/
+image_rag_*/
+
+# Backup/Archive
+archive/
+*_backup/
+scripts_backup/
+
+# Claude
+.claude/
+
+# LaunchAgents (personal configuration)
+config/*.configured

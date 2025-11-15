@@ -30,7 +30,14 @@ def nl2br(value):
 env.filters['date'] = date_filter
 env.filters['nl2br'] = nl2br
 
-def render_note(template_name: str, context: dict) -> str:
+def render_note(template_name: str, context: dict, include_ai_links: bool = False) -> str:
+    """Render markdown note from template
+
+    Args:
+        template_name: Name of the Jinja2 template
+        context: Dictionary of variables to pass to template
+        include_ai_links: Whether to include AI tool links (ignored for compatibility)
+    """
     template = env.get_template(template_name)
     return template.render(**context)
 
