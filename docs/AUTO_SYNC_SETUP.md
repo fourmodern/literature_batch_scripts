@@ -17,7 +17,7 @@ macOS에서 Zotero-Obsidian 동기화를 자동으로 실행하는 시스템입�
 ### 1. 로그 디렉토리 생성
 
 ```bash
-mkdir -p /Users/fourmodern/literature_batch_scripts/logs/auto_sync
+mkdir -p /Users/username/literature_batch_scripts/logs/auto_sync
 ```
 
 ### 2. 수동 테스트 (먼저 확인!)
@@ -27,7 +27,7 @@ mkdir -p /Users/fourmodern/literature_batch_scripts/logs/auto_sync
 conda activate zot
 
 # 스크립트 실행
-python /Users/fourmodern/literature_batch_scripts/scripts/zotero_auto_sync.py
+python /Users/username/literature_batch_scripts/scripts/zotero_auto_sync.py
 ```
 
 제대로 작동하면:
@@ -40,14 +40,14 @@ python /Users/fourmodern/literature_batch_scripts/scripts/zotero_auto_sync.py
 
 ```bash
 # plist 파일을 LaunchAgents에 복사
-cp /Users/fourmodern/literature_batch_scripts/config/com.fourmodern.zotero-sync.plist \
+cp /Users/username/literature_batch_scripts/config/com.username.zotero-sync.plist \
    ~/Library/LaunchAgents/
 
 # 권한 설정
-chmod 644 ~/Library/LaunchAgents/com.fourmodern.zotero-sync.plist
+chmod 644 ~/Library/LaunchAgents/com.username.zotero-sync.plist
 
 # launchd 등록
-launchctl load ~/Library/LaunchAgents/com.fourmodern.zotero-sync.plist
+launchctl load ~/Library/LaunchAgents/com.username.zotero-sync.plist
 ```
 
 ### 4. 작동 확인
@@ -57,17 +57,17 @@ launchctl load ~/Library/LaunchAgents/com.fourmodern.zotero-sync.plist
 launchctl list | grep zotero-sync
 
 # 로그 확인
-tail -f /Users/fourmodern/literature_batch_scripts/logs/auto_sync/sync_*.log
+tail -f /Users/username/literature_batch_scripts/logs/auto_sync/sync_*.log
 
 # 표준 출력 확인
-tail -f /Users/fourmodern/literature_batch_scripts/logs/auto_sync/launchd_stdout.log
+tail -f /Users/username/literature_batch_scripts/logs/auto_sync/launchd_stdout.log
 ```
 
 ## ⚙️ 설정 변경
 
 ### 실행 주기 변경
 
-`config/com.fourmodern.zotero-sync.plist` 파일의 `StartInterval` 값 수정:
+`config/com.username.zotero-sync.plist` 파일의 `StartInterval` 값 수정:
 
 ```xml
 <!-- 30분마다 (1800초) -->
@@ -83,8 +83,8 @@ tail -f /Users/fourmodern/literature_batch_scripts/logs/auto_sync/launchd_stdout
 
 변경 후 다시 로드:
 ```bash
-launchctl unload ~/Library/LaunchAgents/com.fourmodern.zotero-sync.plist
-launchctl load ~/Library/LaunchAgents/com.fourmodern.zotero-sync.plist
+launchctl unload ~/Library/LaunchAgents/com.username.zotero-sync.plist
+launchctl load ~/Library/LaunchAgents/com.username.zotero-sync.plist
 ```
 
 ### Python 경로 변경
@@ -95,7 +95,7 @@ launchctl load ~/Library/LaunchAgents/com.fourmodern.zotero-sync.plist
 <key>ProgramArguments</key>
 <array>
     <string>/your/custom/python/path</string>
-    <string>/Users/fourmodern/literature_batch_scripts/scripts/zotero_auto_sync.py</string>
+    <string>/Users/username/literature_batch_scripts/scripts/zotero_auto_sync.py</string>
 </array>
 ```
 
@@ -109,18 +109,18 @@ which python
 
 ### 일시 중지
 ```bash
-launchctl unload ~/Library/LaunchAgents/com.fourmodern.zotero-sync.plist
+launchctl unload ~/Library/LaunchAgents/com.username.zotero-sync.plist
 ```
 
 ### 다시 시작
 ```bash
-launchctl load ~/Library/LaunchAgents/com.fourmodern.zotero-sync.plist
+launchctl load ~/Library/LaunchAgents/com.username.zotero-sync.plist
 ```
 
 ### 완전 제거
 ```bash
-launchctl unload ~/Library/LaunchAgents/com.fourmodern.zotero-sync.plist
-rm ~/Library/LaunchAgents/com.fourmodern.zotero-sync.plist
+launchctl unload ~/Library/LaunchAgents/com.username.zotero-sync.plist
+rm ~/Library/LaunchAgents/com.username.zotero-sync.plist
 ```
 
 ## 📊 로그 확인
@@ -128,25 +128,25 @@ rm ~/Library/LaunchAgents/com.fourmodern.zotero-sync.plist
 ### 동기화 로그
 ```bash
 # 오늘 로그 확인
-tail -100 /Users/fourmodern/literature_batch_scripts/logs/auto_sync/sync_$(date +%Y%m%d).log
+tail -100 /Users/username/literature_batch_scripts/logs/auto_sync/sync_$(date +%Y%m%d).log
 
 # 실시간 모니터링
-tail -f /Users/fourmodern/literature_batch_scripts/logs/auto_sync/sync_$(date +%Y%m%d).log
+tail -f /Users/username/literature_batch_scripts/logs/auto_sync/sync_$(date +%Y%m%d).log
 ```
 
 ### 변동사항 기록
 ```bash
 # 최근 변동사항 JSON 파일
-ls -lt /Users/fourmodern/literature_batch_scripts/logs/auto_sync/changes_*.json | head -5
+ls -lt /Users/username/literature_batch_scripts/logs/auto_sync/changes_*.json | head -5
 ```
 
 ### launchd 로그
 ```bash
 # 표준 출력
-tail -f /Users/fourmodern/literature_batch_scripts/logs/auto_sync/launchd_stdout.log
+tail -f /Users/username/literature_batch_scripts/logs/auto_sync/launchd_stdout.log
 
 # 에러 출력
-tail -f /Users/fourmodern/literature_batch_scripts/logs/auto_sync/launchd_stderr.log
+tail -f /Users/username/literature_batch_scripts/logs/auto_sync/launchd_stderr.log
 ```
 
 ## 🔧 문제 해결
@@ -155,7 +155,7 @@ tail -f /Users/fourmodern/literature_batch_scripts/logs/auto_sync/launchd_stderr
 
 **권한 확인:**
 ```bash
-ls -l ~/Library/LaunchAgents/com.fourmodern.zotero-sync.plist
+ls -l ~/Library/LaunchAgents/com.username.zotero-sync.plist
 # -rw-r--r-- 형태여야 함 (644)
 ```
 
@@ -169,14 +169,14 @@ ls -l ~/Library/LaunchAgents/com.fourmodern.zotero-sync.plist
 
 `.env` 파일이 제대로 로드되는지 확인:
 ```bash
-cat /Users/fourmodern/literature_batch_scripts/.env | grep OUTPUT_DIR
+cat /Users/username/literature_batch_scripts/.env | grep OUTPUT_DIR
 ```
 
 ### 3. 로그에 에러가 있는 경우
 
 ```bash
 # 에러 로그 확인
-grep -i error /Users/fourmodern/literature_batch_scripts/logs/auto_sync/*.log
+grep -i error /Users/username/literature_batch_scripts/logs/auto_sync/*.log
 ```
 
 ### 4. 수동 실행은 되는데 launchd에서 안 되는 경우
@@ -236,7 +236,7 @@ changes = compare_zotero_obsidian(
 
 ```bash
 # 30일 이상 된 로그 삭제
-find /Users/fourmodern/literature_batch_scripts/logs/auto_sync -name "*.log" -mtime +30 -delete
+find /Users/username/literature_batch_scripts/logs/auto_sync -name "*.log" -mtime +30 -delete
 ```
 
 ## 🆘 도움말

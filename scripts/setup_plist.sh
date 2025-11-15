@@ -11,8 +11,8 @@ echo ""
 # 현재 스크립트 위치에서 프로젝트 루트 찾기
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-PLIST_TEMPLATE="$PROJECT_ROOT/config/com.fourmodern.zotero-sync.plist"
-PLIST_OUTPUT="$PROJECT_ROOT/config/com.fourmodern.zotero-sync.plist.configured"
+PLIST_TEMPLATE="$PROJECT_ROOT/config/com.username.zotero-sync.plist"
+PLIST_OUTPUT="$PROJECT_ROOT/config/com.username.zotero-sync.plist.configured"
 
 echo "프로젝트 경로: $PROJECT_ROOT"
 echo ""
@@ -79,7 +79,7 @@ fi
 # sed로 교체 (macOS 호환)
 sed \
     -e "s|/opt/homebrew/anaconda3/envs/zot/bin/python|$PYTHON_PATH|g" \
-    -e "s|/Users/fourmodern/literature_batch_scripts|$PROJECT_ROOT|g" \
+    -e "s|/Users/username/literature_batch_scripts|$PROJECT_ROOT|g" \
     -e "s|/opt/homebrew/anaconda3/envs/zot/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin|$NEW_PATH|g" \
     "$PLIST_TEMPLATE" > "$PLIST_OUTPUT"
 
@@ -106,13 +106,13 @@ echo "1. 설정 파일 확인:"
 echo "   cat $PLIST_OUTPUT"
 echo ""
 echo "2. LaunchAgents에 복사:"
-echo "   cp $PLIST_OUTPUT ~/Library/LaunchAgents/com.fourmodern.zotero-sync.plist"
+echo "   cp $PLIST_OUTPUT ~/Library/LaunchAgents/com.username.zotero-sync.plist"
 echo ""
 echo "3. 권한 설정:"
-echo "   chmod 644 ~/Library/LaunchAgents/com.fourmodern.zotero-sync.plist"
+echo "   chmod 644 ~/Library/LaunchAgents/com.username.zotero-sync.plist"
 echo ""
 echo "4. launchd 등록:"
-echo "   launchctl load ~/Library/LaunchAgents/com.fourmodern.zotero-sync.plist"
+echo "   launchctl load ~/Library/LaunchAgents/com.username.zotero-sync.plist"
 echo ""
 echo "5. 상태 확인:"
 echo "   launchctl list | grep zotero-sync"
@@ -130,18 +130,18 @@ if [[ "$response" =~ ^[Yy]$ ]]; then
     echo "✅ 로그 디렉토리 생성"
 
     # plist 복사
-    cp "$PLIST_OUTPUT" ~/Library/LaunchAgents/com.fourmodern.zotero-sync.plist
+    cp "$PLIST_OUTPUT" ~/Library/LaunchAgents/com.username.zotero-sync.plist
     echo "✅ plist 파일 복사"
 
     # 권한 설정
-    chmod 644 ~/Library/LaunchAgents/com.fourmodern.zotero-sync.plist
+    chmod 644 ~/Library/LaunchAgents/com.username.zotero-sync.plist
     echo "✅ 권한 설정"
 
     # 기존 등록 해제 (있을 경우)
-    launchctl unload ~/Library/LaunchAgents/com.fourmodern.zotero-sync.plist 2>/dev/null || true
+    launchctl unload ~/Library/LaunchAgents/com.username.zotero-sync.plist 2>/dev/null || true
 
     # launchd 등록
-    launchctl load ~/Library/LaunchAgents/com.fourmodern.zotero-sync.plist
+    launchctl load ~/Library/LaunchAgents/com.username.zotero-sync.plist
     echo "✅ launchd 등록"
 
     # 상태 확인
@@ -153,7 +153,7 @@ if [[ "$response" =~ ^[Yy]$ ]]; then
     echo "✅ 설치 완료!"
     echo ""
     echo "테스트 실행:"
-    echo "   launchctl start com.fourmodern.zotero-sync"
+    echo "   launchctl start com.username.zotero-sync"
     echo ""
     echo "로그 확인:"
     echo "   tail -f $PROJECT_ROOT/logs/auto_sync/sync_*.log"

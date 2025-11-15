@@ -4,18 +4,18 @@
 <dict>
     <!-- 서비스 식별자 -->
     <key>Label</key>
-    <string>com.fourmodern.zotero-sync</string>
+    <string>com.username.zotero-sync</string>
 
     <!-- 실행할 프로그램 -->
     <key>ProgramArguments</key>
     <array>
         <string>/opt/homebrew/anaconda3/envs/zot/bin/python</string>
-        <string>/Users/fourmodern/literature_batch_scripts/scripts/zotero_auto_sync.py</string>
+        <string>/Users/username/literature_batch_scripts/scripts/zotero_auto_sync.py</string>
     </array>
 
     <!-- 작업 디렉토리 -->
     <key>WorkingDirectory</key>
-    <string>/Users/fourmodern/literature_batch_scripts</string>
+    <string>/Users/username/literature_batch_scripts</string>
 
     <!-- 환경 변수 -->
     <key>EnvironmentVariables</key>
@@ -38,11 +38,11 @@
 
     <!-- 표준 출력 로그 -->
     <key>StandardOutPath</key>
-    <string>/Users/fourmodern/literature_batch_scripts/logs/auto_sync/launchd_stdout.log</string>
+    <string>/Users/username/literature_batch_scripts/logs/auto_sync/launchd_stdout.log</string>
 
     <!-- 표준 에러 로그 -->
     <key>StandardErrorPath</key>
-    <string>/Users/fourmodern/literature_batch_scripts/logs/auto_sync/launchd_stderr.log</string>
+    <string>/Users/username/literature_batch_scripts/logs/auto_sync/launchd_stderr.log</string>
 
     <!-- 낮은 우선순위 (CPU 점유 최소화) -->
     <key>Nice</key>

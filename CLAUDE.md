@@ -387,7 +387,7 @@ For custom locations, set `PDF_DIR` in `.env`.
 - `ObsidianVault/LiteratureNotes/`: Default output directory for markdown files
 - `_archived/`: Deleted papers are moved here instead of being deleted
 - `sync_report.json`: Sync status comparison report (optional output from sync_checker.py)
-- `config/com.fourmodern.zotero-sync.plist`: macOS launchd configuration
+- `config/com.username.zotero-sync.plist`: macOS launchd configuration
 
 ### Performance Considerations
 - Default 5 parallel workers balances speed and API rate limits
