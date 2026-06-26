@@ -10,7 +10,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 from text_extractor import extract_text_from_pdf, extract_text_and_images
 from gpt_summarizer import generate_short_long, generate_sections
-from markdown_writer import render_note, write_markdown
+from markdown_writer_enhanced import render_note_with_ai_links as render_note, write_markdown
 from utils import setup_logger
 
 def extract_metadata_from_pdf(pdf_path, text):

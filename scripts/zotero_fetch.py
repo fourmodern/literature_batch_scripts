@@ -29,7 +29,11 @@ def format_authors(creators):
 
 def build_collection_hierarchy(zot):
     """Build a dictionary of collection paths keyed by collection key."""
-    collections = zot.collections()
+    # Fetch ALL collections with pagination. zot.collections() returns only the
+    # first 100; with >100 collections, top-level parents fall off the page and
+    # nested paths lose their prefix (e.g. '600.Geninus/629.IHC' instead of
+    # '000.Papers/600.Geninus/629.IHC').
+    collections = zot.everything(zot.collections())
     collection_dict = {c['key']: c for c in collections}
     collection_paths = {}
     
@@ -59,7 +63,7 @@ def build_collection_hierarchy(zot):
 
 def get_collection_key_by_name(zot, collection_name):
     """Find collection key by collection name (case-insensitive partial match)."""
-    collections = zot.collections()
+    collections = zot.everything(zot.collections())
     collection_name_lower = collection_name.lower()
     
     matches = []
@@ -82,14 +86,19 @@ def get_collection_key_by_name(zot, collection_name):
         print(f"Using first match: {matches[0][1]}")
         return matches[0]
 
-def fetch_zotero_items(user_id: str, api_key: str, library_type: str = 'user', limit: int = None, collection_filter: str = None, return_zot_instance: bool = False):
+def fetch_zotero_items(user_id: str, api_key: str, library_type: str = 'user', limit: int = None, collection_filter: str = None, return_zot_instance: bool = False, item_types: list = None):
     """
-    Fetch journalArticle items from Zotero and return list of metadata dicts.
-    
+    Fetch items from Zotero and return list of metadata dicts.
+
     Args:
         collection_filter: If provided, only fetch items from this collection (by name)
         return_zot_instance: If True, return (items, zot) tuple instead of just items
+        item_types: List of item types to fetch (default: ['journalArticle', 'preprint', 'conferencePaper'])
     """
+    if item_types is None or item_types == []:
+        # Fetch ALL item types by using empty string as placeholder
+        item_types = ['']  # Empty string means no itemType filter
+
     zot = zotero.Zotero(user_id, library_type, api_key)
     
     # Build collection hierarchy first
@@ -100,105 +109,166 @@ def fetch_zotero_items(user_id: str, api_key: str, library_type: str = 'user', l
         collection_key, collection_name = get_collection_key_by_name(zot, collection_filter)
         if not collection_key:
             print(f"Collection '{collection_filter}' not found.")
-            available = [c['data']['name'] for c in zot.collections()]
+            available = [c['data']['name'] for c in zot.everything(zot.collections())]
             print(f"Available collections: {', '.join(sorted(available))}")
             if return_zot_instance:
                 return [], zot
             return []
-        
+
         print(f"Fetching items from collection: {collection_name}")
         # Fetch items from specific collection with pagination
         items = []
-        start = 0
-        batch_size = 100
-        
-        # Get total count for this collection
-        try:
-            test_items = zot.collection_items(collection_key, itemType='journalArticle', limit=1)
-            if test_items:
-                total_items = int(zot.request.headers.get('Total-Results', 0))
-                print(f"Total journal articles in collection '{collection_name}': {total_items}")
-            else:
-                total_items = 0
-        except:
-            total_items = 0
-        
-        # Fetch all items in batches
-        while True:
+
+        # Fetch items for each item type
+        for item_type in item_types:
+            start = 0
+            batch_size = 100
+
+            # Get total count for this collection and item type
             try:
-                batch = zot.collection_items(
-                    collection_key, 
-                    itemType='journalArticle',
-                    start=start,
-                    limit=min(batch_size, limit - len(items) if limit else batch_size)
-                )
-                if not batch:
+                if item_type:
+                    test_items = zot.collection_items(collection_key, itemType=item_type, limit=1)
+                    if test_items:
+                        total_items = int(zot.request.headers.get('Total-Results', 0))
+                        print(f"Total {item_type}s in collection '{collection_name}': {total_items}")
+                    else:
+                        total_items = 0
+                else:
+                    # No item type filter - get all items
+                    test_items = zot.collection_items(collection_key, limit=1)
+                    if test_items:
+                        total_items = int(zot.request.headers.get('Total-Results', 0))
+                        print(f"Total items in collection '{collection_name}': {total_items}")
+                    else:
+                        total_items = 0
+            except:
+                total_items = 0
+
+            if total_items == 0:
+                continue
+
+            # Fetch all items in batches
+            while True:
+                try:
+                    remaining_limit = limit - len(items) if limit else None
+                    if remaining_limit is not None and remaining_limit <= 0:
+                        break
+
+                    if item_type:
+                        batch = zot.collection_items(
+                            collection_key,
+                            itemType=item_type,
+                            start=start,
+                            limit=min(batch_size, remaining_limit if remaining_limit else batch_size)
+                        )
+                    else:
+                        # No item type filter
+                        batch = zot.collection_items(
+                            collection_key,
+                            start=start,
+                            limit=min(batch_size, remaining_limit if remaining_limit else batch_size)
+                        )
+                    if not batch:
+                        break
+
+                    items.extend(batch)
+                    print(f"Fetched {len(items)} total items from {collection_name} ({item_type})...")
+
+                    # Check if we've reached the user-specified limit
+                    if limit and len(items) >= limit:
+                        items = items[:limit]
+                        break
+
+                    # Check if we've fetched all items
+                    if len(batch) < batch_size:
+                        break
+
+                    start += batch_size
+
+                except Exception as e:
+                    print(f"Error fetching {item_type} items from collection: {e}")
                     break
-                    
-                items.extend(batch)
-                print(f"Fetched {len(items)}/{total_items if total_items else '?'} items from {collection_name}...")
-                
-                # Check if we've reached the user-specified limit
-                if limit and len(items) >= limit:
-                    items = items[:limit]
-                    break
-                
-                # Check if we've fetched all items
-                if len(batch) < batch_size:
-                    break
-                    
-                start += batch_size
-                
-            except Exception as e:
-                print(f"Error fetching items from collection: {e}")
+
+            # If we've hit the limit, stop fetching other types
+            if limit and len(items) >= limit:
                 break
     else:
-        # Fetch all journal articles with pagination
+        # Fetch all items with pagination
         items = []
-        start = 0
-        batch_size = 100  # Zotero API limit per request
-        
-        # First, get total count
-        try:
-            # Get a single item to check total available
-            test_items = zot.items(itemType='journalArticle', limit=1)
-            if test_items:
-                total_items = int(zot.request.headers.get('Total-Results', 0))
-                print(f"Total journal articles in Zotero: {total_items}")
-            else:
-                total_items = 0
-        except:
-            total_items = 0
-        
-        # Now fetch all items in batches
-        while True:
-            params = {
-                'itemType': 'journalArticle',
-                'start': start,
-                'limit': min(batch_size, limit - len(items) if limit else batch_size)
-            }
-            
+
+        # Fetch items for each item type
+        for item_type in item_types:
+            start = 0
+            batch_size = 100  # Zotero API limit per request
+
+            # First, get total count
             try:
-                batch = zot.items(**params)
-                if not batch:
+                # Get a single item to check total available
+                if item_type:
+                    test_items = zot.items(itemType=item_type, limit=1)
+                    if test_items:
+                        total_items = int(zot.request.headers.get('Total-Results', 0))
+                        print(f"Total {item_type}s in Zotero: {total_items}")
+                    else:
+                        total_items = 0
+                else:
+                    # No item type filter - get all items
+                    test_items = zot.items(limit=1)
+                    if test_items:
+                        total_items = int(zot.request.headers.get('Total-Results', 0))
+                        print(f"Total items in Zotero: {total_items}")
+                    else:
+                        total_items = 0
+            except:
+                total_items = 0
+
+            if total_items == 0:
+                continue
+
+            # Now fetch all items in batches
+            while True:
+                remaining_limit = limit - len(items) if limit else None
+                if remaining_limit is not None and remaining_limit <= 0:
                     break
-                    
-                items.extend(batch)
-                print(f"Fetched {len(items)}/{total_items if total_items else '?'} items...")
-                
-                # Check if we've reached the user-specified limit
-                if limit and len(items) >= limit:
-                    items = items[:limit]
+
+                if item_type:
+                    params = {
+                        'itemType': item_type,
+                        'start': start,
+                        'limit': min(batch_size, remaining_limit if remaining_limit else batch_size)
+                    }
+                else:
+                    # No item type filter
+                    params = {
+                        'start': start,
+                        'limit': min(batch_size, remaining_limit if remaining_limit else batch_size)
+                    }
+
+                try:
+                    batch = zot.items(**params)
+                    if not batch:
+                        break
+
+                    items.extend(batch)
+                    print(f"Fetched {len(items)} total items ({item_type})...")
+
+                    # Check if we've reached the user-specified limit
+                    if limit and len(items) >= limit:
+                        items = items[:limit]
+                        break
+
+                    # Check if we've fetched all items
+                    if len(batch) < batch_size:
+                        break
+
+                    start += batch_size
+
+                except Exception as e:
+                    print(f"Error fetching {item_type} items from Zotero: {e}")
                     break
-                
-                # Check if we've fetched all items
-                if len(batch) < batch_size:
-                    break
-                    
-                start += batch_size
-                
-            except Exception as e:
-                print(f"Error fetching items from Zotero: {e}")
+
+            # If we've hit the limit, stop fetching other types
+            if limit and len(items) >= limit:
                 break
     
     results = []
@@ -272,28 +342,99 @@ def fetch_zotero_items(user_id: str, api_key: str, library_type: str = 'user', l
         return results, zot
     return results
 
+def fetch_zotero_items_by_keys(user_id: str, api_key: str, keys, library_type: str = 'user', return_zot_instance: bool = False):
+    """Fast path: fetch only the specified item keys instead of the whole library.
+
+    Uses zot.item(key) per key (1 API call each) and zot.children(key) for attachments.
+    Skips items that 404 (deleted) and skips children that return 400 (non-PDF parents).
+    Returns the same record format as fetch_zotero_items.
+    """
+    zot = zotero.Zotero(user_id, library_type, api_key)
+    collection_paths = build_collection_hierarchy(zot)
+
+    results = []
+    for key in keys:
+        try:
+            item = zot.item(key)
+        except Exception as e:
+            print(f"Skipping {key}: cannot fetch item ({e})")
+            continue
+
+        data = item.get('data', {})
+        tags = [t['tag'] for t in data.get('tags', []) if 'tag' in t]
+
+        record = {
+            'key': data.get('key'),
+            'title': data.get('title', 'Untitled'),
+            'authors': format_authors(data.get('creators', [])),
+            'abstract': data.get('abstractNote', ''),
+            'publicationTitle': data.get('publicationTitle', ''),
+            'year': extract_year(data.get('date', '')),
+            'doi': data.get('DOI', ''),
+            'date': data.get('date', 'now'),
+            'citekey': data.get('citationKey', data.get('key')),
+            'itemType': data.get('itemType', 'journalArticle'),
+            'volume': data.get('volume', ''),
+            'issue': data.get('issue', ''),
+            'pages': data.get('pages', ''),
+            'publisher': data.get('publisher', ''),
+            'tags': tags,
+            'attachments': [],
+        }
+
+        try:
+            children = zot.children(item['key'])
+            for child in children:
+                cdata = child['data']
+                if cdata.get('contentType') == 'application/pdf':
+                    attachment_info = {
+                        'filename': cdata.get('filename', 'document.pdf'),
+                        'linkMode': cdata.get('linkMode'),
+                        'itemKey': item['key'],
+                        'fileKey': child['key'],
+                    }
+                    if cdata.get('linkMode') in ['imported_file', 'imported_url']:
+                        storage_key = child['key']
+                        attachment_info['path'] = f"storage/{storage_key}/{cdata.get('filename', 'document.pdf')}"
+                    else:
+                        attachment_info['path'] = cdata.get('path', '')
+                    record['attachments'].append(attachment_info)
+        except Exception as e:
+            print(f"Error fetching attachments for {item.get('key', key)}: {e}")
+
+        item_collections = data.get('collections', [])
+        collection_paths_list = [collection_paths[c] for c in item_collections if c in collection_paths]
+        record['collections'] = collection_paths_list
+        record['collection_path'] = collection_paths_list[0] if collection_paths_list else 'Uncategorized'
+        results.append(record)
+
+    if return_zot_instance:
+        return results, zot
+    return results
+
+
 def list_all_collections(user_id: str, api_key: str, library_type: str = 'user'):
     """List all collections with their hierarchy."""
     zot = zotero.Zotero(user_id, library_type, api_key)
     collection_paths = build_collection_hierarchy(zot)
-    
-    # Get item counts for each collection
+
+    # Get item counts for each collection (journalArticle + preprint)
     collection_counts = {}
     for key, path in collection_paths.items():
-        try:
-            # Just get count, not all items
-            test_items = zot.collection_items(key, itemType='journalArticle', limit=1)
-            if test_items:
-                count = int(zot.request.headers.get('Total-Results', 0))
-            else:
-                count = 0
-            collection_counts[path] = count
-        except:
-            collection_counts[path] = 0
-    
+        count = 0
+        for item_type in ['journalArticle', 'preprint']:
+            try:
+                # Just get count, not all items
+                test_items = zot.collection_items(key, itemType=item_type, limit=1)
+                if test_items:
+                    count += int(zot.request.headers.get('Total-Results', 0))
+            except:
+                pass
+        collection_counts[path] = count
+
     # Sort by path for hierarchical display
     sorted_paths = sorted(collection_paths.values())
-    
+
     return [(path, collection_counts.get(path, 0)) for path in sorted_paths]
 
 if __name__ == '__main__':

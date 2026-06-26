@@ -15,8 +15,11 @@ from text_extractor import extract_text_from_pdf, extract_text_and_images, extra
 # Always enable image extraction regardless of summarizer
 EXTRACT_IMAGES = True
 
+# Get project root directory for absolute paths
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
 # Load .env file early to get SUMMARIZER setting
-env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '.env')
+env_path = os.path.join(PROJECT_ROOT, '.env')
 if os.path.exists(env_path):
     load_dotenv(env_path)
     print(f"Loaded environment from: {env_path}")
@@ -26,6 +29,11 @@ else:
 
 # Import the appropriate summarizer based on environment
 summarizer_type = os.getenv('SUMMARIZER', 'gpt').lower()
+_model_name = os.getenv('MODEL', '').lower()
+_gpt_vision_capable = any(tag in _model_name for tag in ('gpt-5', 'gpt-4o'))
+
+from gpt_summarizer import translate_captions, SummarizationFailed  # always available
+
 if summarizer_type == 'gemini':
     try:
         from gemini_summarizer import generate_short_long_with_images as generate_short_long
@@ -33,13 +41,18 @@ if summarizer_type == 'gemini':
         MULTIMODAL_SUPPORT = True
         print("Using Gemini API with multimodal support")
     except ImportError:
-        print("⚠️ Gemini dependencies not available, falling back to GPT")
-        from gpt_summarizer import generate_short_long, generate_sections, translate_captions
+        print("⚠️ Gemini dependencies not available, falling back to GPT (text-only)")
+        from gpt_summarizer import generate_short_long, generate_sections
         MULTIMODAL_SUPPORT = False
+elif _gpt_vision_capable:
+    from gpt_summarizer import generate_short_long_with_images as generate_short_long
+    from gpt_summarizer import generate_sections_with_images as generate_sections
+    MULTIMODAL_SUPPORT = True
+    print(f"Using OpenAI GPT API with multimodal support (model: {_model_name or 'default'})")
 else:
-    from gpt_summarizer import generate_short_long, generate_sections, translate_captions
+    from gpt_summarizer import generate_short_long, generate_sections
     MULTIMODAL_SUPPORT = False
-    print("Using OpenAI GPT API (text-only)")
+    print(f"Using OpenAI GPT API (text-only, model: {_model_name or 'default'})")
 from markdown_writer import render_note, write_markdown
 from utils import setup_logger, is_done, mark_done, save_checkpoint, load_checkpoint, clear_checkpoint
 from zotero_path_finder import get_default_pdf_dir
@@ -83,17 +96,151 @@ def validate_environment():
         sys.exit(1)
 
 def sanitize_folder_name(name):
-    """Sanitize folder name for filesystem."""
-    # Replace problematic characters
+    """Sanitize folder name for filesystem (strips dots/slashes to prevent traversal)."""
     name = name.replace('/', '-').replace('\\', '-').replace(':', '-')
-    name = name.replace('*', '').replace('?', '').replace('"', '').replace('<', '').replace('>', '').replace('|', '')
-    return name.strip()
+    for c in '*?"<>|':
+        name = name.replace(c, '')
+    name = name.strip().strip('.')
+    if name in ('', '.', '..'):
+        name = '_'
+    return name
+
+def parse_keywords_response(keywords_raw, log=None):
+    """Parse keywords from GPT response, handling various formats.
+
+    GPT may return keywords in different formats:
+    - Comma-separated: "keyword1, keyword2, keyword3"
+    - Newline-separated: "keyword1\nkeyword2\nkeyword3"
+    - Mixed format with extra text
+    - Korean text that should be filtered out
+
+    Returns a list of clean keyword strings.
+    """
+    import re
+
+    if not keywords_raw:
+        return []
+
+    if isinstance(keywords_raw, list):
+        return keywords_raw
+
+    if not isinstance(keywords_raw, str):
+        return []
+
+    # Clean up the raw response
+    raw = keywords_raw.strip()
+
+    # If it contains Korean characters explaining the format, it's a malformed response
+    # Extract only the actual keyword-like portions
+    if '샘플' in raw or '모델' in raw or '성능' in raw or '신뢰' in raw:
+        # GPT returned structured data instead of keywords - extract English terms only
+        english_terms = re.findall(r'\b([a-z][a-z\-]+[a-z])\b', raw.lower())
+        # Filter for reasonable keyword length
+        keywords = [term for term in english_terms if 3 <= len(term) <= 40]
+        if log:
+            log.warning(f"Malformed keyword response, extracted {len(keywords)} English terms")
+        return keywords[:10]  # Limit to 10
+
+    # Try comma-separated first (most common format)
+    if ',' in raw:
+        keywords = [kw.strip() for kw in raw.split(',') if kw.strip()]
+        # Check if keywords look valid (no super long ones)
+        if all(len(kw) < 50 for kw in keywords):
+            return keywords
+
+    # Try newline-separated
+    if '\n' in raw:
+        lines = [line.strip() for line in raw.split('\n') if line.strip()]
+        # Filter out lines that look like explanations (too long, contain colons)
+        keywords = []
+        for line in lines:
+            # Skip lines with Korean or explanation patterns
+            if re.search(r'[\u3131-\uD79D]', line):  # Korean characters
+                continue
+            if ':' in line and len(line) > 30:  # Looks like "label: value"
+                continue
+            if len(line) > 50:  # Too long to be a keyword
+                continue
+            keywords.append(line)
+        if keywords:
+            return keywords
+
+    # Fallback: try to extract hyphenated terms
+    hyphenated = re.findall(r'\b([a-z]+(?:-[a-z]+)+)\b', raw.lower())
+    if hyphenated:
+        return hyphenated[:10]
+
+    # Last resort: split by whitespace and filter
+    words = raw.split()
+    keywords = [w.strip('.,;:()[]{}') for w in words if 3 <= len(w) <= 40]
+    return keywords[:10]
+
+
+def sanitize_keywords(keywords):
+    """Sanitize keywords for YAML-safe output.
+
+    Removes special characters that break YAML frontmatter:
+    - Colons, parentheses, brackets, quotes
+    - Equal signs, semicolons
+    - Newlines and excessive whitespace
+
+    Also filters out keywords that are:
+    - Too short (< 2 chars)
+    - Too long (> 50 chars)
+    - Contain numeric data patterns (like n=256, AUC:0.85)
+    """
+    import re
+
+    sanitized = []
+    for kw in keywords:
+        if not kw or not isinstance(kw, str):
+            continue
+
+        # Skip keywords that contain data patterns (likely from problematic GPT output)
+        if re.search(r'[=<>]\s*\d', kw) or re.search(r'\d+\.\d+', kw):
+            continue
+        if re.search(r'n\s*=\s*\d', kw, re.IGNORECASE):
+            continue
+
+        # Remove YAML-breaking characters
+        clean = kw
+        for char in [':', '(', ')', '[', ']', '{', '}', '"', "'", '=', ';', '\n', '\r', '|', '>', '<', '*', '&', '#', '!', '@', '%', '^', '`', '~']:
+            clean = clean.replace(char, '')
+
+        # Replace spaces and slashes with hyphens
+        clean = clean.replace(' ', '-').replace('/', '-').replace('\\', '-')
+
+        # Remove multiple consecutive hyphens
+        while '--' in clean:
+            clean = clean.replace('--', '-')
+
+        # Lowercase and strip
+        clean = clean.lower().strip().strip('-')
+
+        # Filter by length
+        if len(clean) >= 2 and len(clean) <= 50:
+            sanitized.append(clean)
+
+    # Remove duplicates while preserving order
+    seen = set()
+    unique = []
+    for kw in sanitized:
+        if kw not in seen:
+            seen.add(kw)
+            unique.append(kw)
+
+    return unique
 
 def process_item(item, args, log, output_dir, pdf_base_dir, zot=None):
     """Process a single literature item."""
     key = item['key']
     title = item['title']
-    
+
+    # 중복 처리 방지: 이미 done.txt에 있으면 스킵 (요금 누수 방지)
+    if not getattr(args, 'overwrite', False) and is_done(key):
+        log.debug(f"Skipping {key}: already in done.txt")
+        return True  # 성공으로 처리
+
     # Get PDF path
     pdf_path = None
     if item['attachments']:
@@ -129,6 +276,8 @@ def process_item(item, args, log, output_dir, pdf_base_dir, zot=None):
     images = []
     captions = []
     featured_image = None
+    figure_captions = []
+    table_captions = []
     pdf_success = False
     
     if pdf_path and os.path.exists(pdf_path):
@@ -206,11 +355,7 @@ def process_item(item, args, log, output_dir, pdf_base_dir, zot=None):
         else:
             text = "[No text available - neither PDF nor abstract could be extracted]"
             log.warning(f"No text available for {key}")
-        # Empty lists when no PDF available
-        if not pdf_success:
-            figure_captions = []
-            table_captions = []
-    
+
     # Check if we have keywords from Zotero
     zotero_tags = item.get('tags', [])
     
@@ -225,62 +370,43 @@ def process_item(item, args, log, output_dir, pdf_base_dir, zot=None):
         keywords = zotero_tags if zotero_tags else []
         log.info(f"Skipping GPT summarization for {key}")
     elif text:
-        # Generate summaries with appropriate method
-        if MULTIMODAL_SUPPORT and images:
-            short_summary, long_summary = generate_short_long(text, images, captions, title)
-            log.info(f"Generated multimodal summary with {len(images)} images for {key}")
-        else:
-            log.info(f"Generating GPT summaries for {key} (this may take a few minutes with GPT-5)...")
-            short_summary, long_summary = generate_short_long(text, title)
-            log.info(f"✓ Generated summaries for {key}")
-        
-        # Only generate keywords with AI if we don't have Zotero tags
-        if zotero_tags:
-            if MULTIMODAL_SUPPORT and images:
-                contributions, limitations, ideas = generate_sections(text, images, captions, title)[:3]
+        try:
+            # Folder hint for paper-type classification (e.g. '/review/' folder → review)
+            folder_hint = item.get('collections', [None])[0] if item.get('collections') else None
+            # Generate summaries with appropriate method
+            if MULTIMODAL_SUPPORT:
+                log.info(f"⏳ Calling multimodal GPT for {key} with {len(images)} images (may take several minutes with GPT-5.x reasoning)...")
+                short_summary, long_summary = generate_short_long(text, images, captions, title, folder_hint=folder_hint)
+                log.info(f"✓ Generated multimodal summary with {len(images)} images for {key}")
             else:
-                contributions, limitations, ideas = generate_sections(text, title)[:3]  # Get only first 3 returns
-            keywords = zotero_tags
-            log.info(f"Using {len(keywords)} keywords from Zotero for {key}")
-        else:
-            if MULTIMODAL_SUPPORT and images:
-                contributions, limitations, ideas, keywords_raw = generate_sections(text, images, captions, title)
-            else:
-                contributions, limitations, ideas, keywords_raw = generate_sections(text, title)
-            # Parse keywords from the raw response
-            # Debug log for problematic paper
-            if "Human interpretable" in title:
-                log.info(f"DEBUG: Raw keywords for problematic paper: {repr(keywords_raw)}")
-            # Check if keywords_raw is a string that needs parsing
-            if isinstance(keywords_raw, str):
-                # First, try to split by commas (preferred format)
-                if ',' in keywords_raw:
-                    keywords = [kw.strip() for kw in keywords_raw.strip().split(',') if kw.strip()]
-                # Then check for newlines (each line is a complete keyword/phrase)
-                elif '\n' in keywords_raw:
-                    # Each line is a complete keyword, don't split further
-                    keywords = [kw.strip() for kw in keywords_raw.strip().split('\n') if kw.strip()]
-                # Check if it looks like a multi-word phrase pattern (common GPT response issue)
-                elif keywords_raw.strip().startswith(('systems', 'multi', 'virtual', 'agent', 'mathematical')):
-                    # This might be the problematic multi-line response without newlines
-                    # Try to identify keyword boundaries by common patterns
-                    # For now, treat the whole thing as a single problematic response
-                    # and extract individual words that could be keywords
-                    words = keywords_raw.strip().split()
-                    # If we have many single words, it's probably the character-split issue
-                    if len(words) > 15:
-                        # Return a default set of keywords for this problematic case
-                        keywords = ['systems-biology', 'multicellular-dynamics', 'agent-based-models', 
-                                   'mathematical-modeling', 'virtual-cell-lab']
-                    else:
-                        # Otherwise treat as space-separated keywords
-                        keywords = words
+                log.info(f"⏳ Calling text-only GPT for {key} (may take several minutes)...")
+                short_summary, long_summary = generate_short_long(text, title, folder_hint=folder_hint)
+                log.info(f"✓ Generated summaries for {key}")
+
+            # Only generate keywords with AI if we don't have Zotero tags
+            if zotero_tags:
+                log.info(f"⏳ Generating sections (contributions/limitations/ideas) for {key}...")
+                if MULTIMODAL_SUPPORT:
+                    contributions, limitations, ideas = generate_sections(text, images, captions, title)[:3]
                 else:
-                    # Single keyword or space-separated keywords
-                    keywords = keywords_raw.strip().split() if ' ' in keywords_raw else [keywords_raw.strip()]
+                    contributions, limitations, ideas = generate_sections(text, title)[:3]  # Get only first 3 returns
+                keywords = zotero_tags
+                log.info(f"✓ Sections generated; using {len(keywords)} keywords from Zotero for {key}")
             else:
-                keywords = keywords_raw if isinstance(keywords_raw, list) else []
-            log.info(f"Generated {len(keywords)} keywords with AI for {key}")
+                log.info(f"⏳ Generating sections + keywords for {key}...")
+                if MULTIMODAL_SUPPORT:
+                    contributions, limitations, ideas, keywords_raw = generate_sections(text, images, captions, title)
+                else:
+                    contributions, limitations, ideas, keywords_raw = generate_sections(text, title)
+                # Parse keywords from the raw response
+                log.debug(f"DEBUG: Raw keywords: {repr(keywords_raw[:200] if keywords_raw else 'None')}")
+                keywords = parse_keywords_response(keywords_raw, log)
+                # Sanitize keywords to be YAML-safe
+                keywords = sanitize_keywords(keywords)
+                log.info(f"Generated {len(keywords)} keywords with AI for {key}")
+        except SummarizationFailed as e:
+            log.error(f"GPT summarization failed for {key}, NOT marking as done: {e}")
+            return False
     else:
         short_summary = "No text available for summarization."
         long_summary = "No text available for summarization."
@@ -316,8 +442,8 @@ def process_item(item, args, log, output_dir, pdf_base_dir, zot=None):
         'extracted_images': images,
         'image_captions': captions,
         'featured_image': featured_image,
-        'figure_captions': figure_captions if 'figure_captions' in locals() else [],
-        'table_captions': table_captions if 'table_captions' in locals() else []
+        'figure_captions': figure_captions,
+        'table_captions': table_captions
     }
     
     # Convert absolute paths to relative paths for Obsidian
@@ -356,10 +482,15 @@ def process_item(item, args, log, output_dir, pdf_base_dir, zot=None):
     sanitized_parts = [sanitize_folder_name(part) for part in collection_parts]
     folder_path = os.path.join(output_dir, *sanitized_parts)
     
-    # Write file
-    safe_filename = "".join(c for c in title if c.isalnum() or c in ' -_')[:100]
+    # Write file - limit to 80 chars to ensure key is always included (total ~92 chars with _KEY.md)
+    safe_filename = "".join(c for c in title if c.isalnum() or c in ' -_')[:80]
     file_path = os.path.join(folder_path, f"{safe_filename}_{key}.md")
-    
+    abs_out = os.path.realpath(output_dir)
+    abs_file = os.path.realpath(file_path)
+    if not (abs_file == abs_out or abs_file.startswith(abs_out + os.sep)):
+        log.error(f"Refusing to write outside output dir: {file_path}")
+        return False
+
     # Handle PDF path based on --copy-pdfs option
     if args.copy_pdfs and pdf_path and os.path.exists(pdf_path) and not args.dry_run:
         # Copy PDF to Obsidian vault
@@ -379,7 +510,7 @@ def process_item(item, args, log, output_dir, pdf_base_dir, zot=None):
             context['pdf_path'] = rel_pdf_path
             
             # Re-render with updated PDF path
-            md_content = render_note('literature_note.md', context)
+            md_content = render_note('literature_note.md', context, include_ai_links=True)
         except Exception as e:
             log.warning(f"Failed to copy PDF: {e}")
             # Keep original pdf_path if copy fails
@@ -390,14 +521,19 @@ def process_item(item, args, log, output_dir, pdf_base_dir, zot=None):
         if pdf_path:
             context['pdf_path'] = f"file://{pdf_path}"
             # Re-render with file:// path
-            md_content = render_note('literature_note.md', context)
+            md_content = render_note('literature_note.md', context, include_ai_links=True)
     
     if not args.dry_run:
         try:
             write_markdown(md_content, file_path)
-            with done_lock:
-                mark_done(key)
-            log.info(f"Successfully processed {key}: {title}")
+            # Verify file was actually created before marking as done
+            if os.path.exists(file_path) and os.path.getsize(file_path) > 100:
+                with done_lock:  # external lock retained for legacy callers; internal lock now also enforced
+                    mark_done(key)
+                log.info(f"Successfully processed {key}: {title}")
+            else:
+                log.error(f"File was not created or is too small: {file_path}")
+                return False
         except Exception as e:
             log.error(f"Failed to write {file_path}: {e}")
             return False
@@ -454,9 +590,12 @@ def main():
         print("Automatic PDF download may fail due to permission issues.")
     
     os.makedirs(output_dir, exist_ok=True)
-    os.makedirs('logs', exist_ok=True)
-    
-    log = setup_logger('batch', './logs/summary.log')
+
+    # Use absolute path for logs directory
+    logs_dir = os.path.join(PROJECT_ROOT, 'logs')
+    os.makedirs(logs_dir, exist_ok=True)
+
+    log = setup_logger('batch', os.path.join(logs_dir, 'summary.log'))
     log.info(f"Starting batch processing with args: {vars(args)}")
     
     # Handle --list-collections
@@ -485,11 +624,12 @@ def main():
     
     # Always get Zotero instance for automatic PDF downloads
     items, zot = fetch_zotero_items(
-        os.getenv('ZOTERO_USER_ID'), 
-        os.getenv('ZOTERO_API_KEY'), 
+        os.getenv('ZOTERO_USER_ID'),
+        os.getenv('ZOTERO_API_KEY'),
         limit=args.limit,
         collection_filter=args.collection,
-        return_zot_instance=True
+        return_zot_instance=True,
+        item_types=None  # Fetch ALL item types
     )
     
     if not items:
@@ -641,7 +781,7 @@ def main():
     print(f"Successfully processed: {success_count} papers")
     print(f"Errors: {error_count} papers")
     print(f"Output directory: {output_dir}")
-    print(f"Log file: ./logs/summary.log")
+    print(f"Log file: {os.path.join(PROJECT_ROOT, 'logs', 'summary.log')}")
 
 if __name__ == '__main__':
     main()

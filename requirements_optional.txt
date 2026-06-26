@@ -1,0 +1,95 @@
+# Optional Requirements for Enhanced Features
+# 선택적 기능을 위한 추가 패키지
+
+# ==========================================
+# 이미지 처리 및 OCR (Figure Extraction)
+# ==========================================
+# OCR 기능 (이미지에서 텍스트 추출)
+pytesseract>=0.3.10  # OCR engine wrapper
+Pillow>=10.0.0  # 이미지 처리
+
+# 고급 이미지 처리
+opencv-python>=4.8.0  # Computer vision for better figure detection
+numpy>=1.24.0  # 이미 requirements_rag.txt에 있으면 생략 가능
+
+# ==========================================
+# OCR 설치 (시스템 레벨)
+# ==========================================
+# macOS:
+#   brew install tesseract
+#   brew install tesseract-lang  # 다국어 지원 (한국어, 중국어, 일본어)
+#
+# Ubuntu/Debian:
+#   sudo apt-get install tesseract-ocr
+#   sudo apt-get install tesseract-ocr-kor  # 한국어
+#   sudo apt-get install tesseract-ocr-chi-sim  # 중국어 간체
+#   sudo apt-get install tesseract-ocr-jpn  # 일본어
+#
+# Windows:
+#   Download from: https://github.com/UB-Mannheim/tesseract/wiki
+
+# ==========================================
+# 고급 PDF 처리
+# ==========================================
+# PDF 테이블 추출 개선
+camelot-py[cv]>=0.11.0  # Advanced table extraction
+# Note: Requires Ghostscript installed (brew install ghostscript)
+
+# PDF 폼 데이터 추출
+PyPDF2>=3.0.0  # Alternative PDF processing
+
+# ==========================================
+# 성능 최적화
+# ==========================================
+# 병렬 처리 가속
+joblib>=1.3.0  # Better than ThreadPoolExecutor for CPU-bound tasks
+ray>=2.0.0  # Distributed computing (대규모 처리)
+
+# 메모리 최적화
+psutil>=5.9.0  # System resource monitoring
+pympler>=1.0.0  # Memory profiling
+
+# ==========================================
+# 고급 RAG 기능
+# ==========================================
+# Reranking (검색 결과 재순위)
+torch>=2.0.0  # 이미 requirements_rag.txt에 있음
+transformers>=4.30.0  # For cross-encoder reranking
+
+# 하이브리드 검색 (키워드 + 벡터)
+rank-bm25>=0.2.2  # BM25 algorithm
+elasticsearch>=8.0.0  # Full-text search engine
+
+# ==========================================
+# 웹 인터페이스 (선택)
+# ==========================================
+streamlit>=1.28.0  # Simple web UI
+gradio>=4.0.0  # Alternative web UI
+fastapi>=0.104.0  # REST API
+uvicorn>=0.24.0  # ASGI server
+
+# ==========================================
+# 모니터링 및 로깅
+# ==========================================
+wandb>=0.16.0  # Experiment tracking
+loguru>=0.7.0  # Better logging
+rich>=13.0.0  # Beautiful terminal output
+
+# ==========================================
+# 설치 방법
+# ==========================================
+# 기본 기능만:
+#   pip install -r requirements.txt
+#   pip install -r requirements_rag.txt
+#
+# OCR 포함:
+#   pip install pytesseract Pillow
+#   brew install tesseract tesseract-lang
+#
+# 모든 선택 기능:
+#   pip install -r requirements_optional.txt
+#
+# 특정 기능만:
+#   pip install pytesseract Pillow  # OCR만
+#   pip install streamlit  # 웹 UI만
+#   pip install rank-bm25  # 하이브리드 검색만

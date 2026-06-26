@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- 서비스 식별자 -->
+    <key>Label</key>
+    <string>com.fourmodern.zotero-sync</string>
+
+    <!-- 실행할 프로그램 -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>/opt/homebrew/anaconda3/envs/zot/bin/python</string>
+        <string>/Users/fourmodern/literature_batch_scripts/scripts/zotero_auto_sync.py</string>
+    </array>
+
+    <!-- 작업 디렉토리 -->
+    <key>WorkingDirectory</key>
+    <string>/Users/fourmodern/literature_batch_scripts</string>
+
+    <!-- 환경 변수 -->
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/anaconda3/envs/zot/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    </dict>
+
+    <!-- 실행 스케줄: 30분마다 -->
+    <key>StartInterval</key>
+    <integer>1800</integer>
+
+    <!-- 부팅 시 자동 시작 -->
+    <key>RunAtLoad</key>
+    <true/>
+
+    <!-- 종료 시 자동 재시작 -->
+    <key>KeepAlive</key>
+    <false/>
+
+    <!-- 표준 출력 로그 -->
+    <key>StandardOutPath</key>
+    <string>/Users/fourmodern/literature_batch_scripts/logs/auto_sync/launchd_stdout.log</string>
+
+    <!-- 표준 에러 로그 -->
+    <key>StandardErrorPath</key>
+    <string>/Users/fourmodern/literature_batch_scripts/logs/auto_sync/launchd_stderr.log</string>
+
+    <!-- 낮은 우선순위 (CPU 점유 최소화) -->
+    <key>Nice</key>
+    <integer>10</integer>
+
+    <!-- 유저 에이전트 (백그라운드에서 실행) -->
+    <key>ProcessType</key>
+    <string>Background</string>
+</dict>
+</plist>

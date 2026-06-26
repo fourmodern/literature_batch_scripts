@@ -2,6 +2,8 @@
 .env
 .env.local
 .env.*.local
+.env.bak*
+.env.*.bak*
 
 # Python
 __pycache__/
@@ -42,3 +44,25 @@ htmlcov/
 dist/
 build/
 *.egg-info/
+
+# Generated data, vector DBs, caches, backups
+cache/
+data/
+databases/
+archive/
+scripts_backup/
+extracted_images/
+real_multimodal_db/
+improved_vector_db/
+image_rag_clip/
+text_rag_bge_m3/
+text_rag_bge_m3_safe/
+test_vector_db/
+test_images/
+test_extraction/
+test_enhanced/
+.omc/
+
+# Generated reports
+sync_report*.json
+missing_from_pinecone.json

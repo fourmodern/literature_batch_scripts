@@ -11,7 +11,7 @@ from dotenv import load_dotenv
 from pyzotero import zotero
 from text_extractor import extract_text_from_pdf, extract_text_and_images
 from gpt_summarizer import generate_short_long, generate_sections
-from markdown_writer import render_note, write_markdown
+from markdown_writer_enhanced import render_note_with_ai_links as render_note, write_markdown
 from utils import setup_logger
 from zotero_fetch import build_collection_hierarchy
 
@@ -181,7 +181,8 @@ def process_zotero_pdf(pdf_path, output_dir=None, skip_gpt=False, filename_forma
             
             # Generate summaries with title parameter (like gpt_summarizer.py)
             title = item.get('title', 'Unknown')
-            short_summary, long_summary = generate_short_long(text, title)
+            folder_hint = item.get('collections', [None])[0] if item.get('collections') else None
+            short_summary, long_summary = generate_short_long(text, title, folder_hint=folder_hint)
             contribution, limitations, ideas, keywords_raw = generate_sections(text, title)
             
             # Parse keywords from the raw response

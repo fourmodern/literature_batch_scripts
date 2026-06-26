@@ -3,13 +3,13 @@ title: "{{ title | replace('"', '\"') }}"
 tags:
   - literature
   - ai-summary
-{%- for collection in collections %}
-  - "{{ collection | replace('/', '-') | replace(' ', '-') | replace('--', '-') | lower | trim('-') }}"
+{%- for tag in collections | collections_to_tags %}
+  - "{{ tag }}"
 {%- endfor %}
 {%- if keywords %}
 {%- for keyword in keywords %}
-  {%- set clean_keyword = keyword | replace(' ', '-') | replace('--', '-') | lower | trim('-') %}
-  {%- if clean_keyword %}
+  {%- set clean_keyword = keyword | replace(':', '') | replace('(', '') | replace(')', '') | replace('"', '') | replace("'", '') | replace('\n', '') | replace(',', '') | replace(';', '') | replace('=', '') | replace('[', '') | replace(']', '') | replace('{', '') | replace('}', '') | replace('/', '-') | replace(' ', '-') | replace('--', '-') | lower | trim | trim('-') %}
+  {%- if clean_keyword and clean_keyword | length > 1 and clean_keyword | length < 50 %}
   - "{{ clean_keyword }}"
   {%- endif %}
 {%- endfor %}
@@ -52,6 +52,11 @@ journal: "{{ publicationTitle | default('') }}"
 {%- endif %}
 {%- else %}
 > 📄 PDF not available
+{%- endif %}
+
+{%- if ai_tool_links %}
+
+{{ ai_tool_links }}
 {%- endif %}
 
 > [!Abstract]
