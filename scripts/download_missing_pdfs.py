@@ -33,6 +33,7 @@ if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
 from pdf_downloader import ensure_pdf_available
+from app_config import get_zotero_client
 
 
 def find_pdf_dir() -> str:
@@ -121,7 +122,7 @@ def main():
         keys = [line.strip() for line in f if line.strip() and not line.startswith('#')]
     print(f'🔑 Keys to try: {len(keys)}')
 
-    zot = zotero.Zotero(user_id, 'user', api_key)
+    zot = get_zotero_client()
 
     results: List[Dict] = []
     counters = {'downloaded': 0, 'no_pdf_attachment': 0, 'download_failed': 0,

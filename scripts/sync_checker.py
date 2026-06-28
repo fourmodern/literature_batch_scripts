@@ -16,28 +16,20 @@ import sys
 import sqlite3
 import argparse
 import json
-from pathlib import Path
 from collections import defaultdict
 from dotenv import load_dotenv
 
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from scripts.zotero_path_finder import find_zotero_data_directory
+from scripts.app_config import get_zotero_client
 
 
 class ZoteroAPIReader:
     """Zotero Web API를 통해 데이터 읽기 (로컬 앱 불필요)"""
 
     def __init__(self):
-        from pyzotero import zotero
-
-        user_id = os.getenv('ZOTERO_USER_ID')
-        api_key = os.getenv('ZOTERO_API_KEY')
-
-        if not user_id or not api_key:
-            raise ValueError("ZOTERO_USER_ID와 ZOTERO_API_KEY 환경 변수가 필요합니다.")
-
-        self.zot = zotero.Zotero(user_id, 'user', api_key)
+        self.zot = get_zotero_client()
         self._collection_cache = None
 
     def get_collection_hierarchy(self):

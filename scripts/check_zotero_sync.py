@@ -2,9 +2,8 @@
 Diagnostic script to check Zotero sync status and file availability.
 """
 import os
-import sys
 from dotenv import load_dotenv
-from pyzotero import zotero
+from app_config import get_zotero_client
 from zotero_path_finder import get_default_pdf_dir
 
 def check_zotero_sync():
@@ -24,7 +23,7 @@ def check_zotero_sync():
     
     try:
         # Initialize Zotero API
-        zot = zotero.Zotero(user_id, 'user', api_key)
+        zot = get_zotero_client()
         
         # Get storage info
         print("📊 Storage Information:")

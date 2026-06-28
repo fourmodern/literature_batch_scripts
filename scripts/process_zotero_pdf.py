@@ -8,8 +8,8 @@ import argparse
 from pathlib import Path
 from datetime import datetime
 from dotenv import load_dotenv
-from pyzotero import zotero
-from text_extractor import extract_text_from_pdf, extract_text_and_images
+from app_config import get_zotero_client
+from text_extractor import extract_text_and_images
 from gpt_summarizer import generate_short_long, generate_sections
 from markdown_writer_enhanced import render_note_with_ai_links as render_note, write_markdown
 from utils import setup_logger
@@ -34,9 +34,13 @@ def extract_item_key_from_path(pdf_path):
     
     return None
 
-def fetch_item_from_zotero(user_id, api_key, item_key):
-    """Fetch item metadata from Zotero API using item key."""
-    zot = zotero.Zotero(user_id, 'user', api_key)
+def fetch_item_from_zotero(user_id, item_key):
+    """Fetch item metadata from Zotero API using item key.
+
+    ``user_id`` is used only to build the zotero:// web link; the client itself
+    reads its credentials from the environment via get_zotero_client().
+    """
+    zot = get_zotero_client()
     
     try:
         # Get the parent item (the attachment's parent)
@@ -134,7 +138,7 @@ def process_zotero_pdf(pdf_path, output_dir=None, skip_gpt=False, filename_forma
     
     # Fetch metadata from Zotero
     try:
-        item = fetch_item_from_zotero(user_id, api_key, item_key)
+        item = fetch_item_from_zotero(user_id, item_key)
         log.info(f"Fetched metadata for: {item['title']}")
     except Exception as e:
         log.error(f"Failed to fetch metadata from Zotero: {e}")
