@@ -11,10 +11,10 @@ echo
 # 1. 실행 중인 모든 zotero-sync 서비스 중지
 echo "🛑 [1/4] 중복 서비스 중지 중..."
 
-# com.fourmodern.zotero-sync (구버전) 중지
-if launchctl list | grep -q "com.fourmodern.zotero-sync"; then
-    echo "   중지 중: com.fourmodern.zotero-sync"
-    launchctl unload ~/Library/LaunchAgents/com.fourmodern.zotero-sync.plist 2>/dev/null || true
+# com.local.zotero-sync (구버전) 중지
+if launchctl list | grep -q "com.local.zotero-sync"; then
+    echo "   중지 중: com.local.zotero-sync"
+    launchctl unload ~/Library/LaunchAgents/com.local.zotero-sync.plist 2>/dev/null || true
     sleep 1
 fi
 
@@ -30,9 +30,9 @@ echo
 
 # 2. 구버전 plist 파일 삭제
 echo "🗑️  [2/4] 구버전 파일 삭제 중..."
-if [ -f ~/Library/LaunchAgents/com.fourmodern.zotero-sync.plist ]; then
-    rm -f ~/Library/LaunchAgents/com.fourmodern.zotero-sync.plist
-    echo "   ✓ 구버전 plist 삭제: com.fourmodern.zotero-sync.plist"
+if [ -f ~/Library/LaunchAgents/com.local.zotero-sync.plist ]; then
+    rm -f ~/Library/LaunchAgents/com.local.zotero-sync.plist
+    echo "   ✓ 구버전 plist 삭제: com.local.zotero-sync.plist"
 else
     echo "   ℹ️  구버전 plist 없음"
 fi

@@ -24,7 +24,7 @@ def test_text_rag():
 
         # Process one paper
         paper_id = "TEST001"
-        pdf_path = "/Users/fourmodern/Zotero/storage/23PS627K/fphar-10-00698.pdf"
+        pdf_path = os.path.expanduser("~/Zotero/storage/23PS627K/fphar-10-00698.pdf")
 
         result = text_rag.process_paper(
             paper_id,
@@ -60,7 +60,7 @@ def test_image_rag():
 
         # Process one paper
         paper_id = "TEST002"
-        pdf_path = "/Users/fourmodern/Zotero/storage/23PS627K/fphar-10-00698.pdf"
+        pdf_path = os.path.expanduser("~/Zotero/storage/23PS627K/fphar-10-00698.pdf")
 
         result = image_rag.process_paper(
             paper_id,

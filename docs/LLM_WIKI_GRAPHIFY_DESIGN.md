@@ -34,7 +34,7 @@ This repository already supports:
 ### Active Obsidian Vault
 
 ```text
-~/Library/Mobile Documents/iCloud~md~obsidian/Documents/fourmodern
+~/Library/Mobile Documents/iCloud~md~obsidian/Documents/<username>
 ```
 
 Relevant existing folders include:

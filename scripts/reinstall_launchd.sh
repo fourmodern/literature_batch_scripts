@@ -21,12 +21,12 @@ if [ -f "$LAUNCHD_PLIST" ]; then
     echo "   ✓ 기존 plist 파일 발견: $LAUNCHD_PLIST"
 
     # 실행 중인지 확인
-    if launchctl list | grep -q "com.user.zotero-sync\|com.fourmodern.zotero-sync"; then
+    if launchctl list | grep -q "com.user.zotero-sync\|com.local.zotero-sync"; then
         echo "   ⚠️  실행 중인 서비스 중지 중..."
         launchctl unload "$LAUNCHD_PLIST" 2>/dev/null || true
 
-        # fourmodern 이름의 구버전도 확인
-        OLD_PLIST="$LAUNCHD_DIR/com.fourmodern.zotero-sync.plist"
+        # com.local 이름의 구버전도 확인
+        OLD_PLIST="$LAUNCHD_DIR/com.local.zotero-sync.plist"
         if [ -f "$OLD_PLIST" ]; then
             echo "   ⚠️  구버전 plist 중지 중..."
             launchctl unload "$OLD_PLIST" 2>/dev/null || true

@@ -24,7 +24,7 @@ cd literature_batch_scripts
 **방법 B: 직접 복사**
 ```bash
 # 현재 Mac에서 압축
-cd /Users/fourmodern
+cd $HOME
 tar -czf literature_batch_scripts.tar.gz literature_batch_scripts/
 
 # 다른 Mac으로 복사 (AirDrop, USB, scp 등)
@@ -52,7 +52,7 @@ literature_batch_scripts/
 ├── templates/
 │   └── literature_note.md            # 노트 템플릿
 ├── config/
-│   └── com.fourmodern.zotero-sync.plist  # launchd 설정
+│   └── com.local.zotero-sync.plist  # launchd 설정
 ├── .env.example                      # 환경 변수 예시
 └── requirements.txt                  # Python 패키지
 ```
@@ -127,7 +127,7 @@ ls ~/Zotero/storage  # 기본 위치
 **다른 Mac의 경로에 맞게 수정:**
 ```bash
 cd ~/Documents/literature_batch_scripts
-nano config/com.fourmodern.zotero-sync.plist
+nano config/com.local.zotero-sync.plist
 ```
 
 **수정할 부분:**
@@ -232,14 +232,14 @@ Checking for changes...
 
 ```bash
 # plist 파일 복사
-cp ~/Documents/literature_batch_scripts/config/com.fourmodern.zotero-sync.plist \
+cp ~/Documents/literature_batch_scripts/config/com.local.zotero-sync.plist \
    ~/Library/LaunchAgents/
 
 # 권한 설정
-chmod 644 ~/Library/LaunchAgents/com.fourmodern.zotero-sync.plist
+chmod 644 ~/Library/LaunchAgents/com.local.zotero-sync.plist
 
 # launchd 등록
-launchctl load ~/Library/LaunchAgents/com.fourmodern.zotero-sync.plist
+launchctl load ~/Library/LaunchAgents/com.local.zotero-sync.plist
 
 # 등록 확인
 launchctl list | grep zotero-sync
@@ -247,14 +247,14 @@ launchctl list | grep zotero-sync
 
 **출력 예시:**
 ```
--    0    com.fourmodern.zotero-sync
+-    0    com.local.zotero-sync
 ```
 
 ### 8. 작동 확인
 
 **즉시 실행 (테스트용):**
 ```bash
-launchctl start com.fourmodern.zotero-sync
+launchctl start com.local.zotero-sync
 ```
 
 **로그 확인:**
@@ -282,11 +282,11 @@ conda activate zot
 which python
 
 # plist 수정
-nano ~/Library/LaunchAgents/com.fourmodern.zotero-sync.plist
+nano ~/Library/LaunchAgents/com.local.zotero-sync.plist
 
 # 재등록
-launchctl unload ~/Library/LaunchAgents/com.fourmodern.zotero-sync.plist
-launchctl load ~/Library/LaunchAgents/com.fourmodern.zotero-sync.plist
+launchctl unload ~/Library/LaunchAgents/com.local.zotero-sync.plist
+launchctl load ~/Library/LaunchAgents/com.local.zotero-sync.plist
 ```
 
 ### 문제 2: "Missing environment variables" 에러
@@ -327,7 +327,7 @@ echo 'ZOTERO_DATA_DIR=/Users/YOUR_USERNAME/Zotero' >> .env
 # ~는 사용하지 말 것!
 
 # EnvironmentVariables 섹션에 필요한 경로 추가
-nano ~/Library/LaunchAgents/com.fourmodern.zotero-sync.plist
+nano ~/Library/LaunchAgents/com.local.zotero-sync.plist
 ```
 
 ## 📱 macOS 알림 설정
@@ -387,8 +387,8 @@ nano ~/Library/LaunchAgents/com.fourmodern.zotero-sync.plist
 # ~/.zshrc 또는 ~/.bashrc에 추가
 alias zotero-status='launchctl list | grep zotero-sync'
 alias zotero-log='tail -f ~/Documents/literature_batch_scripts/logs/auto_sync/sync_*.log'
-alias zotero-stop='launchctl unload ~/Library/LaunchAgents/com.fourmodern.zotero-sync.plist'
-alias zotero-start='launchctl load ~/Library/LaunchAgents/com.fourmodern.zotero-sync.plist'
+alias zotero-stop='launchctl unload ~/Library/LaunchAgents/com.local.zotero-sync.plist'
+alias zotero-start='launchctl load ~/Library/LaunchAgents/com.local.zotero-sync.plist'
 alias zotero-restart='zotero-stop && zotero-start'
 
 # 적용
@@ -417,15 +417,15 @@ git pull
 # 새 파일 받아서 덮어쓰기
 
 # launchd 재시작
-launchctl unload ~/Library/LaunchAgents/com.fourmodern.zotero-sync.plist
-launchctl load ~/Library/LaunchAgents/com.fourmodern.zotero-sync.plist
+launchctl unload ~/Library/LaunchAgents/com.local.zotero-sync.plist
+launchctl load ~/Library/LaunchAgents/com.local.zotero-sync.plist
 ```
 
 ## 💾 백업 권장사항
 
 정기적으로 백업:
 - `.env` 파일 (API 키 포함)
-- `~/Library/LaunchAgents/com.fourmodern.zotero-sync.plist`
+- `~/Library/LaunchAgents/com.local.zotero-sync.plist`
 - Obsidian vault 전체
 
 Time Machine 또는 iCloud Drive 사용 권장.

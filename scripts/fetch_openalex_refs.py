@@ -34,7 +34,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 OPENALEX_BASE = 'https://api.openalex.org'
-MAILTO = os.getenv('OPENALEX_MAILTO', 'fourmodern@gmail.com')
+MAILTO = os.getenv('OPENALEX_MAILTO', 'your-email@example.com')
 DEFAULT_SLEEP = 0.1  # 10 req/s polite-pool limit
 
 ROOT = Path(__file__).resolve().parent.parent

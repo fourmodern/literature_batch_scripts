@@ -32,7 +32,7 @@ while true; do
     fi
     
     # 현재 마크다운 파일 수
-    OBSIDIAN_DIR="/Users/fourmodern/Library/Mobile Documents/iCloud~md~obsidian/Documents/fourmodern/80. References/81. zotero"
+    OBSIDIAN_DIR="$HOME/ObsidianVault/LiteratureNotes"
     MD_COUNT=$(find "$OBSIDIAN_DIR" -name "*.md" 2>/dev/null | wc -l | tr -d ' ')
     
     # 화면 업데이트

@@ -1,7 +1,7 @@
 #!/bin/bash
 # Remove duplicate markdown files (files ending with " 2.md", " 3.md", etc.)
 
-OBSIDIAN_DIR="/Users/fourmodern/Library/Mobile Documents/iCloud~md~obsidian/Documents/fourmodern/80. References/81. zotero"
+OBSIDIAN_DIR="$HOME/ObsidianVault/LiteratureNotes"
 
 echo "🔍 Finding duplicate files..."
 

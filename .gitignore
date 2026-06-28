@@ -66,3 +66,6 @@ test_enhanced/
 # Generated reports
 sync_report*.json
 missing_from_pinecone.json
+
+# Generated launchd config
+config/*.plist.configured

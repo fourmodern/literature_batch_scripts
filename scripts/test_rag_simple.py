@@ -22,7 +22,7 @@ rag = ImprovedRAGBuilder(
 )
 
 # Process a single PDF
-pdf_path = "/Users/fourmodern/Zotero/storage/23PS627K/fphar-10-00698.pdf"
+pdf_path = os.path.expanduser("~/Zotero/storage/23PS627K/fphar-10-00698.pdf")
 
 if os.path.exists(pdf_path):
     print(f"\n2. Processing PDF: {os.path.basename(pdf_path)}")

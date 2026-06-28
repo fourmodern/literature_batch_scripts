@@ -13,7 +13,7 @@ mkdir -p .obsidian/plugins
 cd .obsidian/plugins
 
 # 3. 이 플러그인 폴더를 복사
-cp -r /Users/fourmodern/literature_batch_scripts/obsidian-zotero-sync-checker .
+cp -r $HOME/literature_batch_scripts/obsidian-zotero-sync-checker .
 
 # 4. 플러그인 폴더로 이동
 cd obsidian-zotero-sync-checker

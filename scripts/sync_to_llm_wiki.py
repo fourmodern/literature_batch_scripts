@@ -32,7 +32,7 @@ SCRIPTS = ROOT / 'scripts'
 
 DEFAULT_SRC_VAULT = Path(os.getenv(
     'OUTPUT_DIR',
-    str(Path.home() / 'Library/Mobile Documents/iCloud~md~obsidian/Documents/fourmodern/80. References/81. zotero'),
+    str(Path.home() / 'ObsidianVault' / 'LiteratureNotes'),
 ))
 DEFAULT_DEST_VAULT = Path(os.getenv(
     'LLM_WIKI_SOURCES',

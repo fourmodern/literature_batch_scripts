@@ -1,8 +1,8 @@
 #!/bin/bash
 # Restore archived papers back to main folder
 
-ARCHIVE_DIR="/Users/fourmodern/Library/Mobile Documents/iCloud~md~obsidian/Documents/fourmodern/80. References/81. zotero/_archived/20251122"
-MAIN_DIR="/Users/fourmodern/Library/Mobile Documents/iCloud~md~obsidian/Documents/fourmodern/80. References/81. zotero"
+ARCHIVE_DIR="$HOME/ObsidianVault/LiteratureNotes/_archived/20251122"
+MAIN_DIR="$HOME/ObsidianVault/LiteratureNotes"
 
 echo "🔄 Restoring papers from archive..."
 echo "Archive: $ARCHIVE_DIR"
