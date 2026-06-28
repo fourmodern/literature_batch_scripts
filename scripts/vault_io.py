@@ -24,7 +24,7 @@ import os
 import re
 import sys
 from pathlib import Path
-from typing import Dict, Iterator, Optional, Union
+from typing import Dict, Iterator, Optional, Tuple, Union
 
 import yaml
 
@@ -94,6 +94,19 @@ def frontmatter_block(text: str) -> Optional[str]:
     """Return the raw YAML frontmatter string (without ``---`` fences), or None."""
     m = FRONTMATTER_RE.match(text)
     return m.group(1) if m else None
+
+
+def split_frontmatter(text: str) -> Optional[Tuple[str, str]]:
+    """Split a note into (frontmatter_with_fences, body), or None if absent.
+
+    The first element includes the surrounding ``---`` fences and the trailing
+    newline (i.e. the regex group(0)); the second is everything after it. Useful
+    for callers that rewrite a block inside the frontmatter and re-join the body.
+    """
+    m = FRONTMATTER_RE.match(text)
+    if not m:
+        return None
+    return m.group(0), text[m.end():]
 
 
 def parse_frontmatter(text: str) -> Optional[Dict]:

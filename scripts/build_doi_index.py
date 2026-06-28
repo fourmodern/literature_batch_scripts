@@ -28,11 +28,11 @@ from typing import Dict, Optional
 
 from dotenv import load_dotenv
 
+from vault_io import iter_markdown, frontmatter_block, key_from_filename
+
 load_dotenv()
 
-FRONTMATTER_RE = re.compile(r'\A---\n(.*?)\n---\n', re.DOTALL)
 DOI_LINE_RE = re.compile(r'^doi:\s*"?([^"\n]*)"?\s*$', re.MULTILINE)
-KEY_FROM_STEM_RE = re.compile(r'_([A-Z0-9]{8})$')
 
 
 def normalize_doi(doi: str) -> Optional[str]:
@@ -53,57 +53,21 @@ def normalize_doi(doi: str) -> Optional[str]:
 
 
 def extract_doi(text: str) -> Optional[str]:
-    m = FRONTMATTER_RE.match(text)
-    if not m:
+    fm = frontmatter_block(text)
+    if fm is None:
         return None
-    fm = m.group(1)
     doi_match = DOI_LINE_RE.search(fm)
     if not doi_match:
         return None
     return normalize_doi(doi_match.group(1))
 
 
-SKIP_DIR_NAMES = {'_archived', '.obsidian', '.trash'}
-
-
-def _is_skipped(path: Path, root: Path) -> bool:
-    """Skip files under any archived/system directory anywhere in the path."""
-    try:
-        rel_parts = path.relative_to(root).parts
-    except ValueError:
-        return True
-    return any(part in SKIP_DIR_NAMES for part in rel_parts)
-
-
-def _iter_markdown(root: Path):
-    """Yield every .md file under root, resilient to iCloud I/O errors.
-
-    Path.rglob() aborts the whole scan if a single os.scandir() raises (e.g.
-    iCloud Drive returns EDEADLK "Resource deadlock avoided" while a directory
-    is being materialised). os.walk(onerror=...) lets us log and skip the bad
-    directory instead, so one transient error no longer kills the entire index
-    build. SKIP_DIR_NAMES are pruned in-place to avoid descending into them.
-    """
-    def _onerror(err: OSError) -> None:
-        print(f'   ⚠️ skipping unreadable dir: {getattr(err, "filename", err)} '
-              f'({err.strerror or err})', file=sys.stderr)
-
-    for dirpath, dirnames, filenames in os.walk(root, onerror=_onerror):
-        dirnames[:] = [d for d in dirnames if d not in SKIP_DIR_NAMES]
-        for name in filenames:
-            if name.endswith('.md'):
-                yield Path(dirpath) / name
-
-
 def build_index(root: Path) -> Dict[str, dict]:
     index: Dict[str, dict] = {}
     duplicates = 0
     no_doi = 0
-    skipped = 0
-    for md in _iter_markdown(root):
-        if _is_skipped(md, root):
-            skipped += 1
-            continue
+    skipped = 0  # directories pruned by iter_markdown are not counted here
+    for md in iter_markdown(root):
         try:
             text = md.read_text(encoding='utf-8')
         except (UnicodeDecodeError, OSError):
@@ -113,12 +77,11 @@ def build_index(root: Path) -> Dict[str, dict]:
             no_doi += 1
             continue
         stem = md.stem
-        key_match = KEY_FROM_STEM_RE.search(stem)
         rec = {
             'path': str(md),
             'rel': str(md.relative_to(root)),
             'stem': stem,
-            'key': key_match.group(1) if key_match else None,
+            'key': key_from_filename(stem),
         }
         if doi in index:
             duplicates += 1
@@ -134,7 +97,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     default_root = os.getenv(
         'OUTPUT_DIR',
-        str(Path.home() / 'Library/Mobile Documents/iCloud~md~obsidian/Documents/fourmodern/80. References/81. zotero'),
+        str(Path.home() / 'ObsidianVault' / 'LiteratureNotes'),
     )
     parser.add_argument('--path', default=default_root, help='Vault root to scan')
     parser.add_argument(

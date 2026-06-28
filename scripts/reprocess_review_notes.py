@@ -59,7 +59,12 @@ from gpt_summarizer import (
     SummarizationFailed,
 )
 from markdown_writer import render_note
-from vault_io import iter_markdown
+from vault_io import (
+    iter_markdown,
+    split_frontmatter,
+    frontmatter_block,
+    key_from_filename,
+)
 
 # --- Markers / parsers --------------------------------------------------------
 
@@ -73,7 +78,6 @@ LEGACY_REVIEW_MARKERS = [
     '리뷰/서베이가 아니라',
 ]
 
-FRONTMATTER_RE = re.compile(r'\A---\n(.*?)\n---\n', re.DOTALL)
 PDF_LINK_RE = re.compile(
     # `.*?\.pdf` instead of `[^)]+` so filenames with embedded parens
     # (e.g. "Antibody-Drug Conjugates (ADCs).pdf") match the whole path.
@@ -94,7 +98,6 @@ REF_SECTION_RE = re.compile(
     re.DOTALL,
 )
 IOS_PDF_LINE_RE = re.compile(r'^> 📱 \[\[pdfs/[^\]]+\]\]\s*$', re.MULTILINE)
-KEY_FROM_STEM_RE = re.compile(r'_([A-Z0-9]{8})$')
 TAG_LINE_RE = re.compile(r'^(\s*-\s+"?)([^"\n]+)("?)\s*$')
 
 
@@ -260,10 +263,9 @@ def normalize_paper_dict(fm: Dict, body: str, vault_root: Path, file_path: Path)
         paper['date'] = datetime.now().strftime('%Y-%m-%d')
 
     # Key
-    stem = file_path.stem
-    key_match = KEY_FROM_STEM_RE.search(stem)
-    if key_match:
-        paper['key'] = key_match.group(1)
+    key = key_from_filename(file_path.stem)
+    if key:
+        paper['key'] = key
 
     # Empty defaults for fields the template references
     paper.setdefault('figure_captions', [])
@@ -302,11 +304,10 @@ def reinject_related_and_ref_section(new_text: str, old_related_block: str,
                                      old_ref_section: Optional[str]) -> str:
     """Replace render_note's default related:/ref section with preserved ones."""
     # Replace related: block in new_text frontmatter
-    fm_match = FRONTMATTER_RE.match(new_text)
-    if not fm_match:
+    split = split_frontmatter(new_text)
+    if split is None:
         return new_text
-    fm = fm_match.group(0)
-    body = new_text[fm_match.end():]
+    fm, body = split
 
     new_related_block = old_related_block if old_related_block.endswith('\n') else old_related_block + '\n'
     rel_match = RELATED_BLOCK_RE.search(fm)
@@ -362,14 +363,14 @@ class NoteProcessor:
         except Exception as e:
             return path, False, f'read error: {e}'
 
-        fm_match = FRONTMATTER_RE.match(raw)
-        if not fm_match:
+        split = split_frontmatter(raw)
+        if split is None:
             return path, False, 'no frontmatter'
-        fm_text = fm_match.group(1)
-        body = raw[fm_match.end():]
+        fm_full, body = split
+        fm_text = frontmatter_block(raw)
 
         # Preserve old artifacts
-        old_related_block = extract_related_lines(fm_match.group(0))
+        old_related_block = extract_related_lines(fm_full)
         old_ref_section = extract_ref_section(body)
 
         fm = parse_simple_yaml(fm_text)

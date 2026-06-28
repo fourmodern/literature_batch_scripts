@@ -16,13 +16,14 @@ Usage:
 """
 
 import argparse
-import os
 import re
 import sys
 from pathlib import Path
 from urllib.parse import unquote
 
 from dotenv import load_dotenv
+
+from vault_io import iter_markdown
 
 load_dotenv()
 
@@ -34,8 +35,6 @@ FILE_LINK_RE = re.compile(
 # Idempotency marker — if this is already present immediately after the
 # 📄 line, skip insertion.
 IOS_MARKER = '📱'
-
-SKIP_DIR_NAMES = {'_archived', '.obsidian', '.trash', 'pdfs', 'img'}
 
 
 def process_file(path: Path, dry_run: bool = False) -> str:
@@ -119,20 +118,7 @@ def main():
 
     print(f'📂 Scanning: {root}')
 
-    # os.walk(onerror=...) instead of Path.rglob() so a single unreadable
-    # directory (iCloud Drive returns EDEADLK "Resource deadlock avoided" while
-    # materialising files) is skipped rather than aborting the whole scan.
-    def _onerror(err: OSError) -> None:
-        print(f'   ⚠️ skipping unreadable dir: {getattr(err, "filename", err)} '
-              f'({err.strerror or err})', file=sys.stderr)
-
-    md_files = []
-    for dirpath, dirnames, filenames in os.walk(root, onerror=_onerror):
-        dirnames[:] = [d for d in dirnames if d not in SKIP_DIR_NAMES]
-        for name in filenames:
-            if name.endswith('.md'):
-                md_files.append(Path(dirpath) / name)
-    md_files.sort()
+    md_files = sorted(iter_markdown(root))
     if args.limit:
         md_files = md_files[: args.limit]
     print(f'   Found {len(md_files)} markdown files')

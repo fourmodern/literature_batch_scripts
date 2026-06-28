@@ -17,7 +17,6 @@ HTML comment markers and replaces it cleanly.
 
 import argparse
 import json
-import os
 import re
 import sys
 from pathlib import Path
@@ -25,15 +24,14 @@ from typing import Dict, List
 
 from dotenv import load_dotenv
 
+from vault_io import SKIP_DIR_NAMES, split_frontmatter
+
 load_dotenv()
 
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_DOI_INDEX = ROOT / 'cache' / 'doi_index.json'
 DEFAULT_REF_MAP = ROOT / 'cache' / 'reference_map.json'
 
-SKIP_DIR_NAMES = {'_archived', '.obsidian', '.trash'}
-
-FRONTMATTER_RE = re.compile(r'\A---\n(.*?)\n---\n', re.DOTALL)
 RELATED_BLOCK_RE = re.compile(r'^related:\s*(\[\])?\s*(\n(?:[ \t]+-[^\n]*\n)*)?', re.MULTILINE)
 
 SECTION_BEGIN = '<!-- references-in-vault:begin -->'
@@ -79,11 +77,10 @@ def update_note(path: Path, related_stems: List[str], section_refs: List[dict], 
         print(f'   ⚠️  read failed for {path}: {e}', file=sys.stderr)
         return False
 
-    fm_match = FRONTMATTER_RE.match(text)
-    if not fm_match:
+    split = split_frontmatter(text)
+    if split is None:
         return False
-    frontmatter = fm_match.group(0)
-    body = text[fm_match.end():]
+    frontmatter, body = split
 
     # Replace related: block in frontmatter
     related_match = RELATED_BLOCK_RE.search(frontmatter)

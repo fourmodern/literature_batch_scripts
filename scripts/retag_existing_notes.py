@@ -37,10 +37,8 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
 from markdown_writer import collections_to_tags  # noqa: E402
-from vault_io import iter_markdown  # noqa: E402
+from vault_io import iter_markdown, split_frontmatter  # noqa: E402
 
-
-FRONTMATTER_RE = re.compile(r'\A---\n(.*?)\n---\n', re.DOTALL)
 # Matches the tags: block: header line + the indented list items below it.
 TAGS_BLOCK_RE = re.compile(
     r'(^tags:[ \t]*\n)((?:[ \t]+-[^\n]*\n)+)',
@@ -144,12 +142,11 @@ def process_file(path: Path, dry_run: bool = False, verbose: bool = False) -> Op
     except (UnicodeDecodeError, OSError) as e:
         return {'path': path, 'error': f'read failed: {e}'}
 
-    fm_match = FRONTMATTER_RE.match(text)
-    if not fm_match:
+    split = split_frontmatter(text)
+    if split is None:
         return None  # No frontmatter; skip silently
 
-    frontmatter = fm_match.group(0)
-    body = text[fm_match.end():]
+    frontmatter, body = split
 
     tags_match = TAGS_BLOCK_RE.search(frontmatter)
     collections_match = COLLECTIONS_BLOCK_RE.search(frontmatter)
