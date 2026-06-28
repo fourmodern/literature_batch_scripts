@@ -21,7 +21,6 @@ Usage:
     python scripts/dedup_stale_notes.py            # executes (with backup)
 """
 import os
-import re
 import sqlite3
 import sys
 import tarfile
@@ -33,10 +32,10 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+from vault_io import iter_markdown, key_from_filename
+
 VAULT = Path(os.path.expanduser(os.getenv('OUTPUT_DIR')))
 ZDB = os.path.expanduser('~/Zotero/zotero.sqlite')
-SKIP = {'_archived', 'img', '.obsidian', '.trash'}
-KEY_RE = re.compile(r'_([A-Z0-9]{8})\.md$')
 
 
 def zotero_deepest_paths():
@@ -62,12 +61,10 @@ def zotero_deepest_paths():
 
 def collect_notes():
     bykey = defaultdict(list)
-    for p in VAULT.rglob('*.md'):
-        if any(x in p.parts for x in SKIP):
-            continue
-        mk = KEY_RE.search(p.name)
-        if mk:
-            bykey[mk.group(1)].append(p)
+    for p in iter_markdown(VAULT):
+        key = key_from_filename(p.name)
+        if key:
+            bykey[key].append(p)
     return bykey
 
 

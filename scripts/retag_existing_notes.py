@@ -37,9 +37,8 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
 from markdown_writer import collections_to_tags  # noqa: E402
+from vault_io import iter_markdown  # noqa: E402
 
-
-SKIP_DIR_NAMES = {'_archived', '.obsidian', '.trash'}
 
 FRONTMATTER_RE = re.compile(r'\A---\n(.*?)\n---\n', re.DOTALL)
 # Matches the tags: block: header line + the indented list items below it.
@@ -208,7 +207,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     default_root = os.getenv(
         'OUTPUT_DIR',
-        str(Path.home() / 'Library/Mobile Documents/iCloud~md~obsidian/Documents/fourmodern/80. References/81. zotero'),
+        str(Path.home() / 'ObsidianVault' / 'LiteratureNotes'),
     )
     parser.add_argument('--path', default=default_root, help='Vault root to scan (default: $OUTPUT_DIR)')
     parser.add_argument('--dry-run', action='store_true', help='Show what would change, do not write')
@@ -222,15 +221,8 @@ def main():
         sys.exit(2)
 
     print(f'📂 Scanning: {root}')
-    md_files = []
-    archived_skipped = 0
-    for md in sorted(root.rglob('*.md')):
-        rel_parts = md.relative_to(root).parts
-        if any(part in SKIP_DIR_NAMES for part in rel_parts):
-            archived_skipped += 1
-            continue
-        md_files.append(md)
-    print(f'   Found {len(md_files)} markdown files ({archived_skipped} skipped: archived/system)')
+    md_files = sorted(iter_markdown(root))
+    print(f'   Found {len(md_files)} markdown files (archived/system dirs excluded)')
     if args.limit:
         md_files = md_files[: args.limit]
         print(f'   Limit applied: processing first {len(md_files)} files')

@@ -141,7 +141,8 @@ def main():
     # Obsidian 노트 수 확인
     output_dir = os.getenv('OUTPUT_DIR', './ObsidianVault/LiteratureNotes/')
     if os.path.exists(output_dir):
-        md_files = list(Path(output_dir).rglob("*.md"))
+        from vault_io import iter_markdown
+        md_files = list(iter_markdown(output_dir))
         print(f"✅ Obsidian 노트: {len(md_files)}개")
     
     # RAG 통계

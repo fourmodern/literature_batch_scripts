@@ -22,9 +22,9 @@ load_dotenv()
 SCRIPTS_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPTS_DIR))
 from markdown_writer import collections_to_tags  # noqa: E402
+from vault_io import iter_markdown  # noqa: E402
 
 VAULT = Path(os.path.expanduser(os.getenv('OUTPUT_DIR')))
-SKIP = {'_archived', '.obsidian', '.trash', 'img'}
 COLL_BLOCK_RE = re.compile(r'(^collections:\s*\n)((?:[ \t]*-[^\n]*\n)+)', re.M)
 
 
@@ -104,9 +104,7 @@ def fix_note(path: Path, dry_run: bool = False) -> bool:
 def main():
     dry = '--dry-run' in sys.argv
     fixed = 0
-    for p in VAULT.rglob('*.md'):
-        if any(part in SKIP for part in p.parts):
-            continue
+    for p in iter_markdown(VAULT):
         text = p.read_text(encoding='utf-8', errors='replace')
         m = COLL_BLOCK_RE.search(text)
         if not m:

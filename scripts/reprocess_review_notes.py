@@ -34,7 +34,6 @@ import re
 import sys
 import threading
 import time
-import traceback
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
@@ -60,6 +59,7 @@ from gpt_summarizer import (
     SummarizationFailed,
 )
 from markdown_writer import render_note
+from vault_io import iter_markdown
 
 # --- Markers / parsers --------------------------------------------------------
 
@@ -96,8 +96,6 @@ REF_SECTION_RE = re.compile(
 IOS_PDF_LINE_RE = re.compile(r'^> 📱 \[\[pdfs/[^\]]+\]\]\s*$', re.MULTILINE)
 KEY_FROM_STEM_RE = re.compile(r'_([A-Z0-9]{8})$')
 TAG_LINE_RE = re.compile(r'^(\s*-\s+"?)([^"\n]+)("?)\s*$')
-
-SKIP_DIR_NAMES = {'_archived', '.obsidian', '.trash'}
 
 
 def is_legacy_review(text: str) -> bool:
@@ -511,13 +509,7 @@ class NoteProcessor:
 
 def find_legacy_review_notes(vault_root: Path) -> List[Path]:
     out: List[Path] = []
-    for md in vault_root.rglob('*.md'):
-        try:
-            rel_parts = md.relative_to(vault_root).parts
-        except ValueError:
-            continue
-        if any(part in SKIP_DIR_NAMES for part in rel_parts):
-            continue
+    for md in iter_markdown(vault_root):
         try:
             head = md.read_text(encoding='utf-8', errors='replace')
         except Exception:
@@ -533,7 +525,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     default_root = os.getenv(
         'OUTPUT_DIR',
-        str(Path.home() / 'Library/Mobile Documents/iCloud~md~obsidian/Documents/fourmodern/80. References/81. zotero'),
+        str(Path.home() / 'ObsidianVault' / 'LiteratureNotes'),
     )
     parser.add_argument('--path', default=default_root, help='Vault root')
     parser.add_argument('--workers', type=int, default=5, help='Parallel workers (default 5)')

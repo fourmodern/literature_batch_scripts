@@ -36,7 +36,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-FRONTMATTER_RE = re.compile(r'\A---\n(.*?)\n---\n', re.DOTALL)
+from vault_io import iter_markdown, frontmatter_block
+
 TITLE_LINE_RE = re.compile(r'^title:\s*"?([^"\n]*)"?\s*$', re.MULTILINE)
 
 # Title patterns that strongly indicate a review/survey.
@@ -69,22 +70,10 @@ REVIEW_BODY_MARKERS = [
     '- 리뷰 주제와 목적',
 ]
 
-SKIP_DIR_NAMES = {'_archived', '.obsidian', '.trash', '.smart-env'}
-
-
-def is_skipped(path: Path, root: Path) -> bool:
-    try:
-        rel_parts = path.relative_to(root).parts
-    except ValueError:
-        return True
-    return any(part in SKIP_DIR_NAMES for part in rel_parts)
-
-
 def extract_title(text: str) -> Optional[str]:
-    m = FRONTMATTER_RE.match(text)
-    if not m:
+    fm = frontmatter_block(text)
+    if fm is None:
         return None
-    fm = m.group(1)
     t = TITLE_LINE_RE.search(fm)
     if not t:
         return None
@@ -103,9 +92,7 @@ def body_has_review_template(body: str) -> bool:
 
 def scan(root: Path) -> List[Path]:
     candidates: List[Path] = []
-    for md in root.rglob('*.md'):
-        if is_skipped(md, root):
-            continue
+    for md in iter_markdown(root):
         try:
             text = md.read_text(encoding='utf-8', errors='replace')
         except Exception:
@@ -124,7 +111,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     default_root = os.getenv(
         'OUTPUT_DIR',
-        str(Path.home() / 'Library/Mobile Documents/iCloud~md~obsidian/Documents/fourmodern/80. References/81. zotero'),
+        str(Path.home() / 'ObsidianVault' / 'LiteratureNotes'),
     )
     parser.add_argument('--path', default=default_root, help='Vault root')
     parser.add_argument('--output', default='cache/under_classified_reviews.txt',
