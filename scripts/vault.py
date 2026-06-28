@@ -14,11 +14,17 @@ These are convenience objects; the underlying functions in ``vault_io`` remain
 the canonical implementation and stay available for existing callers.
 """
 
+import os
+import sys
 from pathlib import Path
 from typing import Dict, Iterator, List, Optional, Union
 
-from app_config import Settings
-import vault_io
+# Make sibling modules importable whether this file is imported flat
+# (``import vault``) or as part of the package (``from scripts import vault``).
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+from app_config import Settings  # noqa: E402
+import vault_io  # noqa: E402
 
 
 class Note:

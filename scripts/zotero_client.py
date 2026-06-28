@@ -17,7 +17,12 @@ thin shims delegating here, so existing callers keep working unchanged.
 import os
 import re
 import sqlite3
+import sys
 from typing import List, Optional, Tuple
+
+# Make sibling modules importable whether this file is imported flat
+# (``import zotero_client``) or as part of the package (``from scripts import …``).
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 
 def extract_year(date_str: str) -> str:
