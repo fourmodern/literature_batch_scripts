@@ -21,7 +21,6 @@ Usage:
     python scripts/dedup_stale_notes.py            # executes (with backup)
 """
 import os
-import sqlite3
 import sys
 import tarfile
 from collections import defaultdict
@@ -33,30 +32,19 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from vault_io import iter_markdown, key_from_filename
+from zotero_client import ZoteroDatabase
 
 VAULT = Path(os.path.expanduser(os.getenv('OUTPUT_DIR')))
-ZDB = os.path.expanduser('~/Zotero/zotero.sqlite')
 
 
 def zotero_deepest_paths():
-    con = sqlite3.connect(f'file:{ZDB}?immutable=1', uri=True)
-    cur = con.cursor()
-    cur.execute('SELECT collectionID,collectionName,parentCollectionID FROM collections')
-    m = {cid: (n, p) for cid, n, p in cur.fetchall()}
-
-    def path_of(cid):
-        parts = []; seen = set()
-        while cid in m and cid not in seen:
-            seen.add(cid); n, p = m[cid]; parts.append(n); cid = p
-        return '/'.join(reversed(parts))
-
-    cur.execute('SELECT items.key, collectionItems.collectionID '
-                'FROM items JOIN collectionItems ON collectionItems.itemID=items.itemID')
-    ic = defaultdict(set)
-    for k, cid in cur.fetchall():
-        ic[k].add(path_of(cid))
-    con.close()
-    return {k: max(v, key=lambda x: x.count('/')) for k, v in ic.items()}
+    """Map each Zotero item key to its deepest (most-nested) collection path."""
+    db = ZoteroDatabase(os.path.expanduser('~/Zotero'))
+    try:
+        return {k: max(v, key=lambda x: x.count('/'))
+                for k, v in db.item_collections().items()}
+    finally:
+        db.close()
 
 
 def collect_notes():
