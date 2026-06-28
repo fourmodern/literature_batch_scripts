@@ -12,6 +12,7 @@ sys.path, or ``from scripts import app_config`` when the repo root is).
 """
 
 import os
+from dataclasses import dataclass, fields
 from pathlib import Path
 from typing import Optional, Sequence
 
@@ -27,6 +28,77 @@ DEFAULT_OUTPUT_DIR = str(Path.home() / 'ObsidianVault' / 'LiteratureNotes')
 
 class ConfigError(RuntimeError):
     """Raised when required configuration / environment is missing."""
+
+
+@dataclass
+class Settings:
+    """All environment-derived configuration in one place.
+
+    Build one with ``Settings.from_env()``. Individual fields mirror the
+    ``.env`` variables; ``output_dir`` is expanded but otherwise values are the
+    raw environment strings (None when unset). The module-level helper functions
+    below remain as thin shims for existing callers.
+    """
+
+    zotero_user_id: Optional[str] = None
+    zotero_api_key: Optional[str] = None
+    output_dir: Optional[str] = None
+    pdf_dir: Optional[str] = None
+    openai_api_key: Optional[str] = None
+    gemini_api_key: Optional[str] = None
+    pinecone_api_key: Optional[str] = None
+    summarizer: str = 'gpt'
+    model: Optional[str] = None
+    gemini_model: Optional[str] = None
+
+    @classmethod
+    def from_env(cls) -> 'Settings':
+        """Read configuration from the (already-loaded) environment."""
+        output_dir = os.getenv('OUTPUT_DIR')
+        pdf_dir = os.getenv('PDF_DIR')
+        return cls(
+            zotero_user_id=os.getenv('ZOTERO_USER_ID'),
+            zotero_api_key=os.getenv('ZOTERO_API_KEY'),
+            output_dir=os.path.expanduser(output_dir) if output_dir else None,
+            pdf_dir=os.path.expanduser(pdf_dir) if pdf_dir else None,
+            openai_api_key=os.getenv('OPENAI_API_KEY'),
+            gemini_api_key=os.getenv('GEMINI_API_KEY'),
+            pinecone_api_key=os.getenv('PINECONE_API_KEY'),
+            summarizer=os.getenv('SUMMARIZER', 'gpt'),
+            model=os.getenv('MODEL'),
+            gemini_model=os.getenv('GEMINI_MODEL'),
+        )
+
+    def require(self, *names: str) -> None:
+        """Raise ConfigError if any named field is unset/empty.
+
+        Names are field names (e.g. 'zotero_user_id') or their .env aliases
+        (e.g. 'ZOTERO_USER_ID'); both forms are accepted.
+        """
+        valid = {f.name for f in fields(self)}
+        missing = []
+        for name in names:
+            field = name.lower()
+            if field not in valid:
+                raise ValueError(f"Unknown Settings field: {name}")
+            if not getattr(self, field):
+                missing.append(name.upper())
+        if missing:
+            raise ConfigError(
+                f"Missing required configuration: {', '.join(missing)}. "
+                f"Set them in your .env file."
+            )
+
+    def resolve_output_dir(self, required: bool = True) -> Optional[str]:
+        """Return output_dir, falling back to DEFAULT_OUTPUT_DIR or raising."""
+        if self.output_dir:
+            return self.output_dir
+        if required:
+            raise ConfigError(
+                "OUTPUT_DIR is not set. Set it in your .env file to your "
+                "Obsidian vault path."
+            )
+        return DEFAULT_OUTPUT_DIR
 
 
 def get_env(name: str, default: Optional[str] = None) -> Optional[str]:
