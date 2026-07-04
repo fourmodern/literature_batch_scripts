@@ -4,11 +4,19 @@ llm-wiki Obsidian vault on iCloud, then refresh cross-references for the
 mirrored vault.
 
 Pipeline (each step idempotent, safe to re-run):
-  1. rsync .md from 81.zotero/ -> llm-wiki/sources/  (skip _archived, --update)
-  2. rsync PDFs from ~/Zotero/storage/ -> llm-wiki/sources/pdfs/  (PDFs only)
-  3. add_ios_pdf_links.py on llm-wiki/sources/  (inserts iOS-clickable link)
-  4. build_doi_index.py + fetch_openalex_refs.py + inject_references.py
+  1. mirror .md notes 81.zotero/ -> llm-wiki/sources/  (fast delta copy)
+  2. mirror img/ figure folders (only newly-added paper folders)
+  3. mirror PDFs ~/Zotero/storage/ -> llm-wiki/sources/pdfs/  (only new keys)
+  4. add_ios_pdf_links.py on llm-wiki/sources/  (inserts iOS-clickable link)
+  5. build_doi_index.py + fetch_openalex_refs.py + inject_references.py
      against the llm-wiki vault so newly mirrored notes pick up cross-links.
+
+Why not `rsync -a --delete` for step 1?  A full-tree rsync stat()s every one of
+~1200 notes plus ~950 img folders across iCloud *before* it transfers anything,
+which stalled the mirror for minutes and left the daemon perpetually behind. We
+instead do a metadata-only os.walk of both vaults (milliseconds even on iCloud)
+and copy only the files that actually differ, so cost scales with new papers,
+not with total vault size.
 
 The OpenAlex fetcher uses its on-disk cache; only DOIs that haven't been seen
 before make HTTP calls, so each incremental sync is cheap.
@@ -18,9 +26,9 @@ Invoke standalone OR from zotero_auto_sync.py after each batch.
 
 import argparse
 import os
+import shutil
 import subprocess
 import sys
-import time
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -59,72 +67,153 @@ def run(label: str, cmd: list, check: bool = False) -> int:
         return e.returncode
 
 
-# rsync exit codes that signal a *transient* I/O problem rather than a real
-# misconfiguration. On this vault the source lives on iCloud Drive, whose file
-# provider intermittently returns EDEADLK ("Resource deadlock avoided") while it
-# is actively materialising files. rsync surfaces that as a partial-transfer
-# error (23) or a hard I/O error (10/11/12/20/30/35). These almost always clear
-# on a short retry once iCloud settles, so we retry instead of aborting the
-# whole mirror (which previously left llm-wiki stuck for days).
-RSYNC_TRANSIENT_CODES = {10, 11, 12, 20, 23, 24, 30, 35}
+# Directory names that are never part of the note mirror: Zotero's archive,
+# the figure/PDF stores (handled by their own steps), and Obsidian's own config
+# and plugin caches which live only in the destination vault.
+SKIP_DIR_NAMES = frozenset({
+    '_archived', 'img', 'pdfs',
+    '.obsidian', '.obsidian-mobile', '.trash', '.smart-env', '.git',
+})
 
 
-def run_rsync_with_retries(label: str, cmd: list, attempts: int = 4, delay: int = 15) -> int:
-    """Run an rsync command, retrying on transient iCloud I/O errors.
+def _walk_md(root: Path):
+    """Return ({relpath: os.stat_result}, walk_ok).
 
-    Returns 0 if any attempt succeeds, otherwise the last non-zero exit code.
+    Metadata-only traversal (no file contents read), so it stays in the
+    millisecond range even when the vault lives on iCloud. ``walk_ok`` is False
+    if the traversal hit *any* I/O error (e.g. iCloud EDEADLK) — callers must
+    then refuse destructive operations, since a partial view of the source must
+    never drive deletions in the mirror.
     """
-    rc = 0
-    for attempt in range(1, attempts + 1):
-        suffix = '' if attempt == 1 else f' (retry {attempt - 1}/{attempts - 1})'
-        rc = run(f'{label}{suffix}', cmd)
-        if rc == 0:
-            return 0
-        if rc not in RSYNC_TRANSIENT_CODES or attempt == attempts:
-            return rc
-        print(f'   ⏳ transient rsync error {rc}; waiting {delay}s before retry '
-              f'(iCloud likely still syncing)', file=sys.stderr)
-        time.sleep(delay)
-    return rc
+    files = {}
+    errors = []
+    for dirpath, dirnames, filenames in os.walk(root, onerror=errors.append):
+        dirnames[:] = [
+            d for d in dirnames
+            if d not in SKIP_DIR_NAMES and not d.startswith('.smtcmp_')
+        ]
+        for name in filenames:
+            if not name.endswith('.md'):
+                continue
+            full = os.path.join(dirpath, name)
+            try:
+                st = os.stat(full)
+            except OSError as exc:
+                errors.append(exc)
+                continue
+            files[os.path.relpath(full, root)] = st
+    return files, not errors
 
 
-def rsync_markdown(src: Path, dest: Path) -> int:
-    """Mirror markdown + img with --delete so Zotero moves / archives in the
-    source show up as moves / removals in the destination. Critical exclusions:
-      - pdfs/   : managed by rsync_pdfs(); --delete must NOT touch it
-      - img/    : already synced as part of source; protect from deletion since
-                  we keep it under the same key-folder layout as the source
-      - _archived: never sync, but also never delete (it isn't present in dest)
-      - dotfiles: Obsidian config, plugin caches, etc. live only in dest
+def mirror_markdown(src: Path, dest: Path) -> int:
+    """Mirror .md notes src -> dest by copying only the delta.
+
+    Replaces a full ``rsync -a --delete`` (which stalled for minutes stat-ing
+    every file over iCloud). A note is (re)copied when it is new or when the
+    source copy is newer than the destination — the ``--update`` rule, so
+    wiki-links injected into the destination later in the pipeline are not
+    clobbered on the next run. Notes that disappear from the source (Zotero
+    archive / collection move) are removed from the mirror, but only when the
+    source walk completed cleanly and did not collapse to a suspiciously small
+    set, so a transient iCloud read can never trigger mass deletion.
     """
     dest.mkdir(parents=True, exist_ok=True)
-    cmd = [
-        'rsync', '-a', '--delete',
-        '--exclude', '_archived',
-        '--exclude', '.DS_Store',
-        '--exclude', '.obsidian',
-        '--exclude', '.obsidian-mobile',
-        '--exclude', '.trash',
-        '--exclude', '.smart-env',
-        '--exclude', '.smtcmp_*',
-        '--exclude', 'pdfs',
-        f'{src}/',
-        f'{dest}/',
-    ]
-    return run_rsync_with_retries('Mirror markdown + img (with delete)', cmd)
+    src_files, src_ok = _walk_md(src)
+    dest_files, _ = _walk_md(dest)
+
+    added = updated = deleted = 0
+    for rel, st in src_files.items():
+        dst_st = dest_files.get(rel)
+        is_new = dst_st is None
+        if is_new or st.st_mtime > dst_st.st_mtime + 2:
+            target = dest / rel
+            target.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                shutil.copy2(src / rel, target)
+                if is_new:
+                    added += 1
+                else:
+                    updated += 1
+            except OSError as exc:
+                print(f'   ⚠️ copy failed {rel}: {exc}', file=sys.stderr)
+
+    stale = dest_files.keys() - src_files.keys()
+    if not src_ok:
+        print('   ⚠️ source walk hit I/O errors; skipping deletions this run '
+              '(copy-only to avoid mirroring a partial view)', file=sys.stderr)
+    elif stale and src_files and len(src_files) >= 0.5 * len(dest_files):
+        for rel in stale:
+            try:
+                (dest / rel).unlink()
+                deleted += 1
+            except OSError as exc:
+                print(f'   ⚠️ delete failed {rel}: {exc}', file=sys.stderr)
+    elif stale:
+        print(f'   ⚠️ {len(stale)} stale notes but source set too small '
+              f'({len(src_files)} vs dest {len(dest_files)}); skipping deletions',
+              file=sys.stderr)
+
+    print(f'   notes: +{added} added, ~{updated} updated, -{deleted} removed '
+          f'(source has {len(src_files)})')
+    return 0
 
 
-def rsync_pdfs(src: Path, dest: Path) -> int:
-    dest.mkdir(parents=True, exist_ok=True)
-    cmd = [
-        'rsync', '-a', '--update',
-        '--include', '*/',
-        '--include', '*.pdf',
-        '--exclude', '*',
-        f'{src}/',
-        f'{dest}/',
-    ]
-    return run_rsync_with_retries('Mirror PDFs', cmd)
+def mirror_img(src_img: Path, dest_img: Path) -> int:
+    """Copy per-paper figure folders that exist in the source but not the
+    mirror. Figures are written once when a paper is processed and never edited,
+    so skipping folders already present keeps this to the new-paper delta."""
+    if not src_img.exists():
+        return 0
+    dest_img.mkdir(parents=True, exist_ok=True)
+    try:
+        src_names = {p.name for p in src_img.iterdir() if p.is_dir()}
+        dest_names = {p.name for p in dest_img.iterdir() if p.is_dir()}
+    except OSError as exc:
+        print(f'   ⚠️ img listing failed: {exc}', file=sys.stderr)
+        return 0
+    copied = 0
+    for name in sorted(src_names - dest_names):
+        try:
+            shutil.copytree(src_img / name, dest_img / name)
+            copied += 1
+        except OSError as exc:
+            print(f'   ⚠️ img copy failed {name}: {exc}', file=sys.stderr)
+    print(f'   img: +{copied} new folders (source has {len(src_names)})')
+    return 0
+
+
+def mirror_pdfs(storage: Path, dest_pdfs: Path) -> int:
+    """Copy the .pdf(s) from Zotero storage keys not yet mirrored. PDFs are
+    immutable once stored, so existing key folders are skipped."""
+    if not storage.exists():
+        return 0
+    dest_pdfs.mkdir(parents=True, exist_ok=True)
+    try:
+        dest_keys = {p.name for p in dest_pdfs.iterdir() if p.is_dir()}
+        key_dirs = [p for p in storage.iterdir() if p.is_dir()]
+    except OSError as exc:
+        print(f'   ⚠️ pdf listing failed: {exc}', file=sys.stderr)
+        return 0
+    copied = 0
+    for key_dir in key_dirs:
+        if key_dir.name in dest_keys:
+            continue
+        try:
+            pdfs = [f for f in key_dir.iterdir() if f.suffix.lower() == '.pdf']
+        except OSError:
+            continue
+        if not pdfs:
+            continue
+        out_dir = dest_pdfs / key_dir.name
+        out_dir.mkdir(exist_ok=True)
+        for pdf in pdfs:
+            try:
+                shutil.copy2(pdf, out_dir / pdf.name)
+                copied += 1
+            except OSError as exc:
+                print(f'   ⚠️ pdf copy failed {pdf.name}: {exc}', file=sys.stderr)
+    print(f'   pdfs: +{copied} new files')
+    return 0
 
 
 def add_ios_links(vault: Path) -> int:
@@ -201,17 +290,18 @@ def main():
     print(f'📤 Source:      {src}')
     print(f'📥 Destination: {dest}')
 
-    # 1. markdown + img
-    rc = rsync_markdown(src, dest)
-    if rc != 0:
-        print('❌ Markdown mirror failed; aborting downstream steps', file=sys.stderr)
-        sys.exit(rc)
+    # 1. markdown notes (critical, fast delta)
+    print('\n▶ Mirror markdown notes (delta)')
+    mirror_markdown(src, dest)
 
-    # 2. PDFs
+    # 2. figure folders (best-effort, new-paper delta)
+    print('\n▶ Mirror img figure folders (delta)')
+    mirror_img(src / 'img', dest / 'img')
+
+    # 3. PDFs
     if not args.skip_pdfs:
-        rc = rsync_pdfs(pdf_src, dest / 'pdfs')
-        if rc != 0:
-            print('⚠️  PDF mirror failed; continuing (notes still usable)', file=sys.stderr)
+        print('\n▶ Mirror PDFs (delta)')
+        mirror_pdfs(pdf_src, dest / 'pdfs')
 
     # 3. iOS PDF links
     rc = add_ios_links(dest)
