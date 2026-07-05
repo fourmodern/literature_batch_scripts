@@ -34,6 +34,11 @@ _gpt_vision_capable = any(tag in _model_name for tag in ('gpt-5', 'gpt-4o'))
 
 from gpt_summarizer import translate_captions, SummarizationFailed  # always available
 
+# generate_all* consolidates classification + short + long + sections + keywords
+# into a single structured call (GPT path only). It is None for Gemini, whose
+# pipeline keeps the legacy per-step calls.
+generate_all = None
+
 if summarizer_type == 'gemini':
     try:
         from gemini_summarizer import generate_short_long_with_images as generate_short_long
@@ -43,14 +48,17 @@ if summarizer_type == 'gemini':
     except ImportError:
         print("⚠️ Gemini dependencies not available, falling back to GPT (text-only)")
         from gpt_summarizer import generate_short_long, generate_sections
+        from gpt_summarizer import generate_all
         MULTIMODAL_SUPPORT = False
 elif _gpt_vision_capable:
     from gpt_summarizer import generate_short_long_with_images as generate_short_long
     from gpt_summarizer import generate_sections_with_images as generate_sections
+    from gpt_summarizer import generate_all_with_images as generate_all
     MULTIMODAL_SUPPORT = True
     print(f"Using OpenAI GPT API with multimodal support (model: {_model_name or 'default'})")
 else:
     from gpt_summarizer import generate_short_long, generate_sections
+    from gpt_summarizer import generate_all
     MULTIMODAL_SUPPORT = False
     print(f"Using OpenAI GPT API (text-only, model: {_model_name or 'default'})")
 from markdown_writer import render_note, write_markdown
@@ -373,36 +381,50 @@ def process_item(item, args, log, output_dir, pdf_base_dir, zot=None):
         try:
             # Folder hint for paper-type classification (e.g. '/review/' folder → review)
             folder_hint = item.get('collections', [None])[0] if item.get('collections') else None
-            # Generate summaries with appropriate method
-            if MULTIMODAL_SUPPORT:
-                log.info(f"⏳ Calling multimodal GPT for {key} with {len(images)} images (may take several minutes with GPT-5.x reasoning)...")
-                short_summary, long_summary = generate_short_long(text, images, captions, title, folder_hint=folder_hint)
-                log.info(f"✓ Generated multimodal summary with {len(images)} images for {key}")
+            if generate_all is not None:
+                # Consolidated path (GPT): 1 classification call + 1 structured
+                # call producing summaries + sections + keywords together.
+                log.info(f"⏳ Calling consolidated GPT for {key} "
+                         f"({len(images) if MULTIMODAL_SUPPORT else 0} images)...")
+                if MULTIMODAL_SUPPORT:
+                    (short_summary, long_summary, contributions, limitations,
+                     ideas, keywords_raw) = generate_all(text, images, captions, title,
+                                                         folder_hint=folder_hint)
+                else:
+                    (short_summary, long_summary, contributions, limitations,
+                     ideas, keywords_raw) = generate_all(text, title, folder_hint=folder_hint)
+                log.info(f"✓ Generated consolidated summary for {key}")
+                if zotero_tags:
+                    keywords = zotero_tags
+                    log.info(f"✓ Using {len(keywords)} keywords from Zotero for {key}")
+                else:
+                    keywords = sanitize_keywords(parse_keywords_response(keywords_raw, log))
             else:
-                log.info(f"⏳ Calling text-only GPT for {key} (may take several minutes)...")
-                short_summary, long_summary = generate_short_long(text, title, folder_hint=folder_hint)
-                log.info(f"✓ Generated summaries for {key}")
+                # Legacy multi-call path (Gemini)
+                if MULTIMODAL_SUPPORT:
+                    log.info(f"⏳ Calling multimodal summarizer for {key} with {len(images)} images...")
+                    short_summary, long_summary = generate_short_long(text, images, captions, title, folder_hint=folder_hint)
+                    log.info(f"✓ Generated multimodal summary with {len(images)} images for {key}")
+                else:
+                    log.info(f"⏳ Calling text-only summarizer for {key}...")
+                    short_summary, long_summary = generate_short_long(text, title, folder_hint=folder_hint)
+                    log.info(f"✓ Generated summaries for {key}")
 
-            # Only generate keywords with AI if we don't have Zotero tags
-            if zotero_tags:
-                log.info(f"⏳ Generating sections (contributions/limitations/ideas) for {key}...")
-                if MULTIMODAL_SUPPORT:
-                    contributions, limitations, ideas = generate_sections(text, images, captions, title)[:3]
+                if zotero_tags:
+                    log.info(f"⏳ Generating sections (contributions/limitations/ideas) for {key}...")
+                    if MULTIMODAL_SUPPORT:
+                        contributions, limitations, ideas = generate_sections(text, images, captions, title)[:3]
+                    else:
+                        contributions, limitations, ideas = generate_sections(text, title)[:3]
+                    keywords = zotero_tags
+                    log.info(f"✓ Sections generated; using {len(keywords)} keywords from Zotero for {key}")
                 else:
-                    contributions, limitations, ideas = generate_sections(text, title)[:3]  # Get only first 3 returns
-                keywords = zotero_tags
-                log.info(f"✓ Sections generated; using {len(keywords)} keywords from Zotero for {key}")
-            else:
-                log.info(f"⏳ Generating sections + keywords for {key}...")
-                if MULTIMODAL_SUPPORT:
-                    contributions, limitations, ideas, keywords_raw = generate_sections(text, images, captions, title)
-                else:
-                    contributions, limitations, ideas, keywords_raw = generate_sections(text, title)
-                # Parse keywords from the raw response
-                log.debug(f"DEBUG: Raw keywords: {repr(keywords_raw[:200] if keywords_raw else 'None')}")
-                keywords = parse_keywords_response(keywords_raw, log)
-                # Sanitize keywords to be YAML-safe
-                keywords = sanitize_keywords(keywords)
+                    log.info(f"⏳ Generating sections + keywords for {key}...")
+                    if MULTIMODAL_SUPPORT:
+                        contributions, limitations, ideas, keywords_raw = generate_sections(text, images, captions, title)
+                    else:
+                        contributions, limitations, ideas, keywords_raw = generate_sections(text, title)
+                    keywords = sanitize_keywords(parse_keywords_response(keywords_raw, log))
                 log.info(f"Generated {len(keywords)} keywords with AI for {key}")
         except SummarizationFailed as e:
             log.error(f"GPT summarization failed for {key}, NOT marking as done: {e}")

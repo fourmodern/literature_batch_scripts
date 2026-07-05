@@ -7,6 +7,7 @@ Generate summaries using OpenAI API with retry logic.
   * 예외 클래스 정리
 """
 
+import json
 import os
 import re
 import time
@@ -491,9 +492,10 @@ def detect_paper_type(text: str, title: str = None, folder_hint: str = None) -> 
 
 def classify_paper_type_llm(text: str, title: str = None, use_cache: bool = True,
                             folder_hint: str = None) -> str:
-    """LLM 기반 논문 유형 분류 (gpt-4o-mini, ~$0.0001/논문).
+    """LLM 기반 논문 유형 분류 (gpt-5-mini, 논문 본문 전체를 읽고 판정).
     Returns one of: 'experimental', 'review', 'computational'.
-    Falls back to detect_paper_type heuristic on API failure or unparsable response.
+    Falls back to the detect_paper_type keyword heuristic ONLY on API failure or
+    an unparsable response — the LLM reading the full text is the primary path.
 
     folder_hint: 컬렉션 경로 (예: '600.Geninus/610.review'). 폴더가 review/survey를
     가리키는 경우 LLM 프롬프트에 강한 우선순위로 전달.
@@ -508,7 +510,18 @@ def classify_paper_type_llm(text: str, title: str = None, use_cache: bool = True
         re.search(r'(^|/)(\d+\.)?(review|survey)(/|$)', hint_lower)
     )
 
-    sample = text[:1500]
+    # Let the model read the actual paper, not just the cover page. The
+    # review-vs-research signal lives in the abstract, introduction and
+    # conclusion — a 1500-char slice was usually just the journal masthead and
+    # author list, so reviews whose titles don't say "review" (e.g. "Beyond
+    # image alignment: Challenges and emerging solutions ...") were misread as
+    # experimental. Send a large span: the informative front plus the tail
+    # (conclusions restate the contribution), trimming only very long papers.
+    body = text or ""
+    if len(body) > 45000:
+        sample = body[:33000] + "\n\n[...중략...]\n\n" + body[-12000:]
+    else:
+        sample = body
     if folder_says_review:
         hint_line = (
             f"Collection folder hint: {folder_hint}\n"
@@ -522,7 +535,7 @@ def classify_paper_type_llm(text: str, title: str = None, use_cache: bool = True
         hint_line = f"Collection folder (organizational hint): {folder_hint}\n\n"
     else:
         hint_line = ""
-    user_text = f"{hint_line}Title: {title or '[no title]'}\n\nFirst section:\n{sample}"
+    user_text = f"{hint_line}Title: {title or '[no title]'}\n\nPaper text:\n{sample}"
 
     classification_prompt = (
         "Classify this academic paper into ONE category based on its PRIMARY CONTRIBUTION:\n\n"
@@ -562,7 +575,10 @@ def classify_paper_type_llm(text: str, title: str = None, use_cache: bool = True
         result = summarize_text_with_retry(
             user_text, classification_prompt,
             model="gpt-5-mini",
-            max_tokens=50,  # GPT-5 series uses some tokens for reasoning; leave headroom
+            # GPT-5 reasoning models spend completion tokens on hidden reasoning
+            # first; 50 left nothing for the visible answer, so every call came
+            # back empty and silently fell through to the keyword heuristic.
+            max_tokens=2000,
             max_retries=2,
             use_optimizer=use_cache,
         )
@@ -842,9 +858,12 @@ def generate_short_long_with_images(text: str, images, captions, title: str = No
     return short, long
 
 
-def generate_sections(text: str, title: str = None, use_optimizer: bool = True):
-    """Generate contributions, limitations, ideas, keywords."""
-    # title 파라미터 활용
+def _section_prompt_texts(title: str = None):
+    """The contribution / limitations / ideas / keywords instruction blocks.
+
+    Factored out so both the legacy per-section path (generate_sections) and the
+    consolidated single-call path (generate_all*) share one source of truth.
+    """
     prefix = f"Paper Title: {title}\n\n" if title else ""
 
     contribution_prompt = (
@@ -904,6 +923,16 @@ def generate_sections(text: str, title: str = None, use_optimizer: bool = True):
         "❌ TCGA-BRCA - 대문자 사용\n"
         "❌ 딥러닝 - 한글 사용"
     )
+    return contribution_prompt, limitations_prompt, ideas_prompt, keywords_prompt
+
+
+def generate_sections(text: str, title: str = None, use_optimizer: bool = True):
+    """Generate contributions, limitations, ideas, keywords (legacy 4-call path).
+
+    Retained as the fallback for generate_all* when the single consolidated call
+    can't be parsed. Kept behavior-identical to the original implementation.
+    """
+    contribution_prompt, limitations_prompt, ideas_prompt, _ = _section_prompt_texts(title)
 
     # 섹션 추출은 gpt-4o-mini 사용 (비용 절감: contributions/limitations/ideas는 간단한 추출 작업)
     model = "gpt-4o-mini"
@@ -928,6 +957,125 @@ def generate_sections_with_images(text: str, images, captions, title: str = None
     if captions:
         text = text + "\n\n📷 [그림 캡션 요약]:\n" + "\n".join(f"- {c}" for c in captions[:10])
     return generate_sections(text, title, use_optimizer)
+
+
+def _build_combined_prompt(paper_type: str, title: str = None) -> str:
+    """Compose ONE prompt that yields short + long summaries, the three analysis
+    sections and keywords as a single JSON object. Reuses the exact type-specific
+    summary prompts and the shared section prompts so per-type quality is kept."""
+    short_prompt, long_prompt = get_prompts_for_paper_type(paper_type, title)
+    contrib, limits, ideas, keywords = _section_prompt_texts(title)
+    return (
+        "당신은 학술 논문을 읽고 아래 6개 필드를 담은 JSON 객체 **하나만** 출력합니다.\n"
+        "코드펜스(```), 설명, 그 외 어떤 텍스트도 붙이지 마세요. 유효한 JSON만 출력합니다.\n"
+        "JSON 문자열 값 안에서는 줄바꿈을 \\n 으로 이스케이프하고 큰따옴표를 \\\" 로 이스케이프하세요.\n\n"
+        "각 필드의 작성 지침은 다음과 같습니다.\n\n"
+        "━━━ short_summary (문자열, 마크다운) ━━━\n" + short_prompt + "\n\n"
+        "━━━ long_summary (문자열, 마크다운) ━━━\n" + long_prompt + "\n\n"
+        "━━━ contributions (문자열, 마크다운 불릿) ━━━\n" + contrib + "\n\n"
+        "━━━ limitations (문자열, 마크다운 불릿) ━━━\n" + limits + "\n\n"
+        "━━━ ideas (문자열, 마크다운 불릿) ━━━\n" + ideas + "\n\n"
+        "━━━ keywords (문자열 10개의 JSON 배열) ━━━\n" + keywords + "\n\n"
+        "최종 출력은 정확히 이 형태의 JSON 하나입니다:\n"
+        '{"short_summary": "...", "long_summary": "...", "contributions": "...", '
+        '"limitations": "...", "ideas": "...", "keywords": ["kw1", "kw2", "..."]}'
+    )
+
+
+def _extract_json_obj(s: str):
+    """Best-effort parse of a JSON object out of a model response (tolerates code
+    fences and leading/trailing prose). Returns dict or None."""
+    if not s:
+        return None
+    t = s.strip()
+    if t.startswith('```'):
+        t = re.sub(r'^```[a-zA-Z]*\n?', '', t)
+        t = re.sub(r'\n?```$', '', t).strip()
+    start, end = t.find('{'), t.rfind('}')
+    if start < 0 or end <= start:
+        return None
+    try:
+        return json.loads(t[start:end + 1])
+    except Exception:
+        return None
+
+
+def _unpack_combined(data: dict):
+    """Turn the parsed JSON into the 6-tuple the pipeline expects."""
+    kw = data.get('keywords', [])
+    if isinstance(kw, list):
+        kw = ", ".join(str(k).strip() for k in kw if str(k).strip())
+    return (
+        str(data.get('short_summary', '')).strip(),
+        str(data.get('long_summary', '')).strip(),
+        str(data.get('contributions', '')).strip(),
+        str(data.get('limitations', '')).strip(),
+        str(data.get('ideas', '')).strip(),
+        str(kw or "").strip(),
+    )
+
+
+def generate_all_with_images(text, images, captions, title=None, use_optimizer=True,
+                             folder_hint=None, paper_type=None):
+    """Consolidated generation: 1 classification call + 1 structured JSON call
+    returning (short, long, contributions, limitations, ideas, keywords).
+
+    Cuts the per-paper GPT calls from ~7 (classify + short + long + 3 sections +
+    keywords) down to 2. If the single call can't be parsed into usable JSON, it
+    falls back to the legacy multi-call path so a note is never left broken."""
+    if not paper_type:
+        paper_type = classify_paper_type_llm(text, title, use_cache=use_optimizer,
+                                             folder_hint=folder_hint)
+    print(f"📄 Detected paper type: {paper_type} (consolidated, {len(images or [])} images)")
+
+    prompt = _build_combined_prompt(paper_type, title)
+    if captions:
+        prompt += "\n\n📷 그림 캡션 (참고):\n" + "\n".join(f"- {c}" for c in captions[:10])
+
+    model = os.getenv("MODEL", "gpt-5.5")
+    max_tokens = 14000 if paper_type == 'review' else 11000
+    try:
+        raw = summarize_text_with_images_retry(text, images, prompt, model=model,
+                                               max_tokens=max_tokens, use_optimizer=use_optimizer)
+        data = _extract_json_obj(raw)
+        if data and data.get('short_summary') and data.get('long_summary'):
+            return _unpack_combined(data)
+        print("⚠️ Consolidated JSON unusable; falling back to multi-call path")
+    except SummarizationFailed:
+        print("⚠️ Consolidated call failed; falling back to multi-call path")
+
+    short, long = generate_short_long_with_images(text, images, captions, title,
+                                                  use_optimizer=use_optimizer,
+                                                  folder_hint=folder_hint, paper_type=paper_type)
+    contributions, limitations, ideas, keywords = generate_sections_with_images(
+        text, images, captions, title, use_optimizer)
+    return short, long, contributions, limitations, ideas, keywords
+
+
+def generate_all(text, title=None, use_optimizer=True, folder_hint=None, paper_type=None):
+    """Text-only consolidated generation (mirrors generate_all_with_images)."""
+    if not paper_type:
+        paper_type = classify_paper_type_llm(text, title, use_cache=use_optimizer,
+                                             folder_hint=folder_hint)
+    print(f"📄 Detected paper type: {paper_type} (consolidated)")
+
+    prompt = _build_combined_prompt(paper_type, title)
+    model = os.getenv("MODEL", "gpt-5.2-pro")
+    max_tokens = 14000 if paper_type == 'review' else 11000
+    try:
+        raw = summarize_text_with_retry(text, prompt, model=model,
+                                        max_tokens=max_tokens, use_optimizer=use_optimizer)
+        data = _extract_json_obj(raw)
+        if data and data.get('short_summary') and data.get('long_summary'):
+            return _unpack_combined(data)
+        print("⚠️ Consolidated JSON unusable; falling back to multi-call path")
+    except SummarizationFailed:
+        print("⚠️ Consolidated call failed; falling back to multi-call path")
+
+    short, long = generate_short_long(text, title, use_optimizer=use_optimizer,
+                                      folder_hint=folder_hint, paper_type=paper_type)
+    contributions, limitations, ideas, keywords = generate_sections(text, title, use_optimizer)
+    return short, long, contributions, limitations, ideas, keywords
 
 
 def generate_keywords_only(text: str, max_tokens: int = 300) -> str:
