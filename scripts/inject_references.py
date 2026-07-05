@@ -32,7 +32,16 @@ ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_DOI_INDEX = ROOT / 'cache' / 'doi_index.json'
 DEFAULT_REF_MAP = ROOT / 'cache' / 'reference_map.json'
 
-RELATED_BLOCK_RE = re.compile(r'^related:\s*(\[\])?\s*(\n(?:[ \t]+-[^\n]*\n)*)?', re.MULTILINE)
+# Match the whole `related:` block: the key line (optionally with an inline
+# `[]`) plus every indented list item beneath it. Only [ \t] is allowed after
+# the colon — a bare `\s*` here would greedily swallow the newline *and* the
+# leading indentation of the first list item, so the list-item group then failed
+# to match and those items were left orphaned at column 0. Re-running injection
+# on top of that kept prepending fresh blocks, accumulating malformed YAML.
+RELATED_BLOCK_RE = re.compile(
+    r'^related:[ \t]*(?:\[\])?[ \t]*\n(?:[ \t]+-[^\n]*\n)*',
+    re.MULTILINE,
+)
 
 SECTION_BEGIN = '<!-- references-in-vault:begin -->'
 SECTION_END = '<!-- references-in-vault:end -->'
